@@ -1,40 +1,73 @@
-export function DxcLogo({ className = "h-7 w-auto" }: { className?: string }) {
+export function DxcLogo({ className = "h-auto w-full" }: { className?: string }) {
   return (
     <svg
-      viewBox="0 0 240 80"
+      viewBox="0 0 1170 371"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       role="img"
-      aria-label="DXC"
+      aria-label="DXC — Impossible. Delivered."
     >
       <defs>
-        <linearGradient id="dxc-main" x1="0%" y1="45%" x2="100%" y2="55%">
-          <stop offset="0%" stopColor="#3B82F6" />
-          <stop offset="32%" stopColor="#FF7A45" />
-          <stop offset="67%" stopColor="#FFA447" />
-          <stop offset="100%" stopColor="#5678F4" />
+        <linearGradient id="dxc-d" x1="0%" y1="30%" x2="100%" y2="70%">
+          <stop offset="0%" stopColor="#4387F4" />
+          <stop offset="58%" stopColor="#EF6F69" />
+          <stop offset="100%" stopColor="#FF7A2E" />
         </linearGradient>
-        <filter id="dxc-glow" x="-30%" y="-80%" width="160%" height="260%">
-          <feGaussianBlur stdDeviation="2.4" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
+        <linearGradient id="dxc-x" x1="0%" y1="50%" x2="100%" y2="50%">
+          <stop offset="0%" stopColor="#FF7A2E" />
+          <stop offset="50%" stopColor="#FFA43B" />
+          <stop offset="100%" stopColor="#FF6A35" />
+        </linearGradient>
+        <linearGradient id="dxc-c" x1="0%" y1="60%" x2="100%" y2="30%">
+          <stop offset="0%" stopColor="#FF6A35" />
+          <stop offset="55%" stopColor="#E56878" />
+          <stop offset="100%" stopColor="#4B7FF2" />
+        </linearGradient>
       </defs>
-      <g
-        fill="none"
-        stroke="url(#dxc-main)"
-        strokeLinecap="square"
-        strokeLinejoin="round"
-        strokeWidth="9"
-        filter="url(#dxc-glow)"
-      >
-        <path d="M18 24 H52 C68 24 78 31 78 40 C78 49 68 56 52 56 H18" />
-        <path d="M98 24 C111 35 121 40 133 40 C145 40 156 35 169 24" />
-        <path d="M98 56 C111 45 121 40 133 40 C145 40 156 45 169 56" />
-        <path d="M222 24 H190 C175 24 166 31 166 40 C166 49 175 56 190 56 H222" />
+
+      <g fill="none" strokeLinecap="square" strokeLinejoin="round" strokeWidth="37">
+        <path
+          stroke="url(#dxc-d)"
+          d="M58 44 H254 C319 44 349 76 349 111 C349 148 319 180 254 180 H58"
+        />
+        <path
+          stroke="url(#dxc-x)"
+          d="M410 44 C490 110 543 111 585 111 C628 111 681 110 760 44"
+        />
+        <path
+          stroke="url(#dxc-x)"
+          d="M410 180 C490 114 543 111 585 111 C628 111 681 114 760 180"
+        />
+        <path
+          stroke="url(#dxc-c)"
+          d="M1112 44 H916 C852 44 821 76 821 111 C821 148 852 180 916 180 H1112"
+        />
       </g>
+
+      <text
+        x="585"
+        y="274"
+        textAnchor="middle"
+        fill="#141218"
+        fontFamily="Inter, Arial, sans-serif"
+        fontSize="48"
+        fontWeight="900"
+        letterSpacing="1.5"
+      >
+        IMPOSSIBLE.
+      </text>
+      <text
+        x="585"
+        y="337"
+        textAnchor="middle"
+        fill="#141218"
+        fontFamily="Inter, Arial, sans-serif"
+        fontSize="48"
+        fontWeight="900"
+        letterSpacing="1.5"
+      >
+        DELIVERED.
+      </text>
     </svg>
   );
 }
