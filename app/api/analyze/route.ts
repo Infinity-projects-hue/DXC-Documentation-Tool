@@ -6,51 +6,45 @@ import {
 
 export const runtime = "nodejs";
 
-const schema = {
-  type: "object",
-  additionalProperties: false,
+const responseSchema = {
+  type: "OBJECT",
   properties: {
     workNotes: {
-      type: "object",
-      additionalProperties: false,
+      type: "OBJECT",
       properties: {
-        issue: { type: "string" },
+        issue: { type: "STRING" },
         tsPerformed: {
-          type: "array",
-          items: { type: "string" },
+          type: "ARRAY",
+          items: { type: "STRING" },
         },
-        output: { type: "string" },
+        output: { type: "STRING" },
       },
       required: ["issue", "tsPerformed", "output"],
     },
-    resolutionNotes: { type: "string" },
+    resolutionNotes: { type: "STRING" },
   },
   required: ["workNotes", "resolutionNotes"],
 } as const;
 
-function extractOutputText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const output = (payload as { output?: unknown }).output;
-  if (!Array.isArray(output)) return null;
-
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const content = (item as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
-    for (const part of content) {
-      if (
-        part &&
-        typeof part === "object" &&
-        (part as { type?: unknown }).type === "output_text" &&
-        typeof (part as { text?: unknown }).text === "string"
-      ) {
-        return (part as { text: string }).text;
-      }
-    }
-  }
-
-  return null;
-}
+const systemInstruction = [
+  "You are a senior IT service desk documentation analyst.",
+  "The input may be a chat transcript, call summary, or narrative interaction summary.",
+  "Use only information explicitly available in the supplied interaction.",
+  "Never invent troubleshooting actions, technical causes, outcomes, approvals, timelines, or resolutions.",
+  "Return only Work Notes and Resolution Notes using the required JSON schema.",
+  "Do not return a Summary section, Next Action, RCA, customer email, recommendations, or any other section.",
+  "Work Notes issue must clearly state the user-facing problem and any confirmed blocker or status.",
+  "Work Notes tsPerformed must include one concise past-tense action per array item.",
+  "Include only actions actually completed or explicitly communicated by the agent, such as verification, checks, changes, instructions, links, ticket references, escalation, and documented follow-up.",
+  "Do not add actions that are merely implied.",
+  "Remove duplicate actions, greetings, filler, and repeated conversation.",
+  "Work Notes output must state the observed result or current case status, including pending assignment or escalation when applicable.",
+  "Do not label a pending, referred, or escalated case as resolved.",
+  "Resolution Notes must be one concise professional sentence suitable for ServiceNow.",
+  "For a confirmed resolution, state the actual fix and confirmation.",
+  "For a pending or escalated case, state that it was not resolved and identify the pending dependency or receiving team.",
+  "Correct grammar and product names while preserving the technical meaning.",
+].join(" ");
 
 function isValidOutput(value: unknown): value is AnalyzerOutput {
   if (!value || typeof value !== "object") return false;
@@ -58,10 +52,69 @@ function isValidOutput(value: unknown): value is AnalyzerOutput {
   return (
     typeof candidate.workNotes?.issue === "string" &&
     Array.isArray(candidate.workNotes?.tsPerformed) &&
+    candidate.workNotes.tsPerformed.length > 0 &&
     candidate.workNotes.tsPerformed.every((item) => typeof item === "string") &&
     typeof candidate.workNotes?.output === "string" &&
     typeof candidate.resolutionNotes === "string"
   );
+}
+
+function extractGeminiText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidates = (payload as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) return null;
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const content = (candidate as { content?: unknown }).content;
+    if (!content || typeof content !== "object") continue;
+    const parts = (content as { parts?: unknown }).parts;
+    if (!Array.isArray(parts)) continue;
+
+    const text = parts
+      .map((part) =>
+        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+          ? (part as { text: string }).text
+          : "",
+      )
+      .join("")
+      .trim();
+
+    if (text) return text;
+  }
+
+  return null;
+}
+
+function parseStructuredOutput(text: string): unknown {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "");
+  return JSON.parse(cleaned) as unknown;
+}
+
+function normalizeOutput(output: AnalyzerOutput): AnalyzerOutput {
+  const uniqueActions = Array.from(
+    new Map(
+      output.workNotes.tsPerformed
+        .map((item) => item.trim().replace(/^[>•*\-\d.)\s]+/, ""))
+        .filter(Boolean)
+        .map((item) => [item.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), item]),
+    ).values(),
+  ).slice(0, 12);
+
+  return {
+    workNotes: {
+      issue: output.workNotes.issue.trim(),
+      tsPerformed:
+        uniqueActions.length > 0
+          ? uniqueActions
+          : ["No troubleshooting actions were clearly documented in the supplied interaction."],
+      output: output.workNotes.output.trim(),
+    },
+    resolutionNotes: output.resolutionNotes.trim(),
+  };
 }
 
 export async function POST(request: Request) {
@@ -88,7 +141,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json({
       output: analyzeTranscriptLocally(transcript),
@@ -96,56 +149,57 @@ export async function POST(request: Request) {
     });
   }
 
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-5-mini",
-        store: false,
-        max_output_tokens: 1200,
-        instructions: [
-          "You create professional IT service desk documentation from a supplied support interaction.",
-          "Use only facts explicitly present in the transcript.",
-          "Never invent troubleshooting, outcomes, commands, causes, or resolutions.",
-          "Return only Work Notes and Resolution Notes in the provided schema.",
-          "Work Notes issue must briefly explain the reported problem.",
-          "Work Notes tsPerformed must contain only actual checks, changes, commands, investigations, and actions performed. Remove duplicates, greetings, identity verification, and irrelevant conversation.",
-          "Work Notes output must state the observed result of those actions.",
-          "Resolution Notes must be exactly one concise professional sentence.",
-          "When no resolution is confirmed, use exactly: The issue remains unresolved, and further investigation is required.",
-        ].join(" "),
-        input: transcript,
-        text: {
-          format: {
-            type: "json_schema",
-            name: "support_documentation",
-            description: "Grounded ITSM work notes and one-sentence resolution notes.",
-            strict: true,
-            schema,
-          },
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": apiKey,
         },
-      }),
-    });
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemInstruction }],
+          },
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `Create grounded ITSM documentation from this interaction:\n\n${transcript}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            maxOutputTokens: 1400,
+            responseMimeType: "application/json",
+            responseSchema,
+          },
+        }),
+      },
+    );
 
     if (!response.ok) {
-      throw new Error(`OpenAI request failed with status ${response.status}`);
+      const detail = await response.text();
+      throw new Error(`Gemini request failed with status ${response.status}: ${detail.slice(0, 300)}`);
     }
 
     const payload = (await response.json()) as unknown;
-    const outputText = extractOutputText(payload);
-    const parsed = outputText ? (JSON.parse(outputText) as unknown) : null;
+    const outputText = extractGeminiText(payload);
+    const parsed = outputText ? parseStructuredOutput(outputText) : null;
 
     if (!isValidOutput(parsed)) {
-      throw new Error("The analyzer returned an invalid response shape.");
+      throw new Error("Gemini returned an invalid documentation response.");
     }
 
-    return NextResponse.json({ output: parsed, mode: "ai" });
+    return NextResponse.json({ output: normalizeOutput(parsed), mode: "gemini" });
   } catch (error) {
-    console.error("AI analysis failed; using grounded local fallback.", error);
+    console.error("Gemini analysis failed; using grounded local fallback.", error);
     return NextResponse.json({
       output: analyzeTranscriptLocally(transcript),
       mode: "local",
