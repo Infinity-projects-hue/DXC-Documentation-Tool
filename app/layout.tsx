@@ -4,29 +4,22 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "DXC AI Service Desk Documentation Assistant",
+  title: "DXC AI Interaction Analyzer",
   description:
-    "Transform Microsoft Teams chats, call transcripts, and ticket notes into professional ITSM documentation using AI.",
-  metadataBase: new URL("https://dxc-ai-docs.vercel.app"),
+    "Convert customer support interactions into grounded Work Notes and concise Resolution Notes for ITSM workflows.",
 };
 
 export const viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FBF8F3" },
-    { media: "(prefers-color-scheme: dark)", color: "#0A1224" },
-  ],
+  themeColor: "#070A11",
+  colorScheme: "dark",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className="scroll-smooth">
+    <html lang="en" suppressHydrationWarning className="dark scroll-smooth">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="font-sans">
         <Providers>{children}</Providers>
