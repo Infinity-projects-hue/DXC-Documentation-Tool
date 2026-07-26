@@ -25,45 +25,112 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useAppStore, type WorkNotes } from "@/store/useAppStore";
+import {
+  useAppStore,
+  type DocumentationOutput,
+  type WorkNotes,
+} from "@/store/useAppStore";
 import { cn } from "@/lib/utils";
 
 type IconComp = React.ComponentType<{ className?: string; strokeWidth?: number }>;
+type Tone = "blue" | "violet" | "orange";
+
+function splitIntoSentences(value: string): string[] {
+  return value
+    .replace(/\r/g, "")
+    .split(/\n+/)
+    .flatMap((line) => {
+      const cleaned = line
+        .trim()
+        .replace(/^\s*(?:[>*•-]|\d+[.)])\s*/, "")
+        .trim();
+
+      if (!cleaned) return [];
+
+      return (
+        cleaned.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? [cleaned]
+      )
+        .map((sentence) => sentence.trim())
+        .filter(Boolean);
+    });
+}
+
+function quoteLines(value: string | string[]): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.flatMap(splitIntoSentences);
+}
+
+function formatQuotedSection(title: string, lines: string[]): string {
+  return [title, ...lines.map((line) => `> ${line}`)].join("\n");
+}
+
+function buildCombinedClipboardText(output: DocumentationOutput): string {
+  return [
+    "Work Notes",
+    "",
+    formatQuotedSection("Issue", quoteLines(output.workNotes.issue)),
+    "",
+    formatQuotedSection(
+      "Troubleshooting Performed",
+      quoteLines(output.workNotes.tsPerformed),
+    ),
+    "",
+    formatQuotedSection("Output", quoteLines(output.workNotes.output)),
+    "",
+    "---",
+    "",
+    "Resolution Notes",
+    "",
+    ...quoteLines(output.resolutionNotes).map((line) => `> ${line}`),
+  ].join("\n");
+}
 
 function useCopyState() {
   const [copied, setCopied] = React.useState<string | null>(null);
+
   const doCopy = async (id: string, text: string) => {
+    if (!text) return;
+
     try {
       await navigator.clipboard.writeText(text);
       setCopied(id);
-      setTimeout(() => setCopied((x) => (x === id ? null : x)), 1800);
+      setTimeout(
+        () => setCopied((current) => (current === id ? null : current)),
+        1800,
+      );
     } catch {
-      /* ignore */
+      /* Clipboard access can be unavailable in restricted browser contexts. */
     }
   };
+
   return { copied, doCopy };
 }
 
 export function OutputCards() {
-  const output = useAppStore((s) => s.output);
-  const isGenerating = useAppStore((s) => s.isGenerating);
+  const output = useAppStore((state) => state.output);
+  const isGenerating = useAppStore((state) => state.isGenerating);
 
   const showSkeleton = isGenerating || !output;
   const showOutput = !!output && !isGenerating;
+  const combinedClipboardText = showOutput
+    ? buildCombinedClipboardText(output)
+    : "";
 
   return (
-    <div className="relative mx-auto w-full max-w-[1440px]">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div className="relative isolate mx-auto w-full max-w-[1440px] overflow-hidden rounded-[32px] border border-border/50 bg-background/60 px-4 py-5 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.65)] backdrop-blur-xl md:px-6 md:py-7">
+      <CinematicDocumentationBackdrop />
+
+      <div className="relative z-10 mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold tracking-tight md:text-xl">
             Generated Documentation
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
             {showOutput
-              ? "Structured Work Notes and Resolution Notes below. Click to copy."
+              ? "Structured Work Notes and Resolution Notes below. Every sentence is ServiceNow-ready."
               : showSkeleton
-              ? "Your documentation is being generated..."
-              : "Paste a transcript or call summary above, then click Analyze."}
+                ? "Your documentation is being generated..."
+                : "Paste a transcript or call summary above, then click Analyze."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -72,32 +139,53 @@ export function OutputCards() {
         </div>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-5">
+      <div className="relative z-10 grid gap-5 lg:grid-cols-3">
         <AnimatePresence mode="popLayout">
           {(showSkeleton || showOutput) && (
             <>
               <OutputCardWrapper
-                key="work-notes"
-                title="Work Notes"
+                key="work-notes-issue"
+                title="Work Notes · Issue"
                 icon={FileCog}
                 tone="blue"
-                description="Issue · TS Performed · Output — ready to paste"
-                className="xl:col-span-3"
+                description="Reported symptoms, user impact and ticket context"
+                copyText={combinedClipboardText}
+                copyEnabled={showOutput}
+                delay={0}
               >
                 {showOutput ? (
-                  <WorkNotesContent data={output.workNotes} />
+                  <IssueContent data={output.workNotes} />
                 ) : (
-                  <SkeletonContent lines={[7, 5, 6]} />
+                  <SkeletonContent lines={[5, 4, 6]} />
                 )}
               </OutputCardWrapper>
 
               <OutputCardWrapper
-                key="resolution"
+                key="work-notes-troubleshooting"
+                title="Work Notes · Troubleshooting"
+                icon={RefreshCw}
+                tone="violet"
+                description="Verified technical actions and resulting output"
+                copyText={combinedClipboardText}
+                copyEnabled={showOutput}
+                delay={0.08}
+              >
+                {showOutput ? (
+                  <TroubleshootingContent data={output.workNotes} />
+                ) : (
+                  <SkeletonContent lines={[7, 6, 5]} />
+                )}
+              </OutputCardWrapper>
+
+              <OutputCardWrapper
+                key="resolution-notes"
                 title="Resolution Notes"
                 icon={Scale}
                 tone="orange"
-                description="Short paragraph — ready for ServiceNow"
-                className="xl:col-span-2"
+                description="Professional closure notes ready for ServiceNow"
+                copyText={combinedClipboardText}
+                copyEnabled={showOutput}
+                delay={0.16}
               >
                 {showOutput ? (
                   <ResolutionContent text={output.resolutionNotes} />
@@ -113,47 +201,112 @@ export function OutputCards() {
   );
 }
 
+function CinematicDocumentationBackdrop() {
+  return (
+    <div
+      aria-hidden
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden [perspective:1200px]"
+    >
+      <motion.div
+        className="absolute -left-24 top-0 h-72 w-72 rounded-full bg-sky-500/15 blur-3xl"
+        animate={{
+          x: [0, 34, 0],
+          y: [0, 24, 0],
+          scale: [0.92, 1.08, 0.92],
+        }}
+        transition={{ duration: 12, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="absolute -right-20 bottom-0 h-80 w-80 rounded-full bg-orange-500/15 blur-3xl"
+        animate={{
+          x: [0, -28, 0],
+          y: [0, -22, 0],
+          scale: [1.05, 0.9, 1.05],
+        }}
+        transition={{ duration: 14, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="absolute left-[14%] top-[-46%] h-[480px] w-[720px] rounded-[42%] border border-sky-500/15 bg-gradient-to-br from-sky-500/10 via-violet-500/5 to-transparent shadow-[0_0_90px_rgba(46,107,230,0.08)] [transform-style:preserve-3d]"
+        animate={{
+          rotateX: [58, 66, 58],
+          rotateY: [-18, 16, -18],
+          rotateZ: [0, 10, 0],
+          y: [0, 18, 0],
+        }}
+        transition={{ duration: 18, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="absolute bottom-[-55%] right-[-12%] h-[430px] w-[600px] rounded-[44%] border border-orange-500/15 bg-gradient-to-tr from-orange-500/10 via-violet-500/5 to-transparent [transform-style:preserve-3d]"
+        animate={{
+          rotateX: [-54, -62, -54],
+          rotateY: [18, -14, 18],
+          rotateZ: [0, -12, 0],
+          x: [0, -18, 0],
+        }}
+        transition={{ duration: 20, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.div
+        className="absolute inset-x-[10%] top-1/2 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"
+        animate={{ opacity: [0.15, 0.65, 0.15], scaleX: [0.75, 1, 0.75] }}
+        transition={{ duration: 5.5, repeat: Infinity, ease: "easeInOut" }}
+      />
+    </div>
+  );
+}
+
 function OutputCardWrapper({
   title,
   description,
   icon: Icon,
   tone,
   children,
-  className,
+  copyText,
+  copyEnabled,
+  delay,
 }: {
   title: string;
   description: string;
   icon: IconComp;
-  tone: "blue" | "orange";
+  tone: Tone;
   children: React.ReactNode;
-  className?: string;
+  copyText: string;
+  copyEnabled: boolean;
+  delay: number;
 }) {
   const toneAccent = {
     blue: "from-sky-500/20 via-sky-500/10 to-transparent text-sky-700 dark:text-sky-300",
+    violet:
+      "from-violet-500/20 via-violet-500/10 to-transparent text-violet-700 dark:text-violet-300",
     orange:
       "from-orange-500/25 via-orange-500/10 to-transparent text-orange-700 dark:text-orange-300",
   }[tone];
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: 20, rotateX: -4 }}
+      animate={{ opacity: 1, y: 0, rotateX: 0 }}
       exit={{ opacity: 0, y: -10 }}
-      transition={{ duration: 0.45, ease: "easeOut" }}
-      className={className}
+      whileHover={{ y: -6, rotateX: 1.2, rotateY: -1.2 }}
+      transition={{ duration: 0.5, delay, ease: "easeOut" }}
+      className="h-full [transform-style:preserve-3d]"
     >
-      <Card className="relative flex h-full min-h-[420px] flex-col overflow-hidden">
-        <div
+      <Card className="relative flex h-full min-h-[460px] flex-col overflow-hidden border-border/70 bg-background/80 shadow-[0_20px_60px_-38px_rgba(15,23,42,0.8)] backdrop-blur-xl">
+        <motion.div
           aria-hidden
-          className={`pointer-events-none absolute inset-x-0 top-0 h-32 bg-gradient-to-b ${toneAccent} opacity-90`}
+          className={`pointer-events-none absolute inset-x-0 top-0 h-36 bg-gradient-to-b ${toneAccent}`}
+          animate={{ opacity: [0.7, 1, 0.7] }}
+          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
         />
         <CardHeader className="relative">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3">
-              <div
-                className={`flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br ${toneAccent} ring-1 ring-border/60 shadow-sm`}
+              <motion.div
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${toneAccent} ring-1 ring-border/60 shadow-sm`}
+                animate={{ rotateY: [0, 10, 0], rotateX: [0, -6, 0] }}
+                transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
               >
                 <Icon className="h-5.5 w-5.5" strokeWidth={2.1} />
-              </div>
+              </motion.div>
               <div>
                 <CardTitle className="text-base md:text-[17px]">
                   {title}
@@ -163,112 +316,151 @@ function OutputCardWrapper({
                 </CardDescription>
               </div>
             </div>
-            <CardActionsBar cardKey={title} />
+            <CardActionsBar
+              cardKey={title}
+              copyText={copyText}
+              copyEnabled={copyEnabled}
+            />
           </div>
         </CardHeader>
         <Separator className="opacity-60" />
-        <CardContent className="relative flex-1 pt-5">
-          {children}
-        </CardContent>
+        <CardContent className="relative flex-1 pt-5">{children}</CardContent>
       </Card>
     </motion.div>
   );
 }
 
-function CardActionsBar({ cardKey }: { cardKey: string }) {
+function CardActionsBar({
+  cardKey,
+  copyText,
+  copyEnabled,
+}: {
+  cardKey: string;
+  copyText: string;
+  copyEnabled: boolean;
+}) {
   const { copied, doCopy } = useCopyState();
+  const copyId = `copy-${cardKey}`;
   const actions = [
     {
-      id: `copy-${cardKey}`,
+      id: copyId,
       icon: Copy,
-      label: "Copy",
-      onClick: () => doCopy(`copy-${cardKey}`, `[${cardKey}] copied`),
-      active: copied === `copy-${cardKey}`,
+      label: "Copy Work Notes and Resolution Notes",
+      onClick: () => doCopy(copyId, copyText),
+      active: copied === copyId,
+      disabled: !copyEnabled,
     },
-    { id: `edit-${cardKey}`, icon: Pencil, label: "Edit", onClick: () => {} },
+    {
+      id: `edit-${cardKey}`,
+      icon: Pencil,
+      label: "Edit",
+      onClick: () => {},
+      disabled: false,
+    },
     {
       id: `regen-${cardKey}`,
       icon: RefreshCw,
       label: "Regenerate",
       onClick: () => {},
+      disabled: false,
     },
     {
       id: `dl-${cardKey}`,
       icon: Download,
       label: "Download",
       onClick: () => {},
+      disabled: false,
     },
   ];
+
   return (
     <div className="flex items-center gap-1 rounded-xl border border-border/60 bg-background/70 p-1 shadow-sm backdrop-blur">
-      {actions.map(({ id, icon: I, label, onClick, active }) => (
-        <Tooltip key={id}>
-          <TooltipTrigger asChild>
-            <button
-              onClick={onClick}
-              className={cn(
-                "inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/15 hover:text-foreground",
-                active && "text-emerald-600 dark:text-emerald-400",
-              )}
-              aria-label={label}
-            >
-              {active ? (
-                <Check className="h-4 w-4" />
-              ) : (
-                <I className="h-4 w-4" strokeWidth={2} />
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{label}</TooltipContent>
-        </Tooltip>
+      {actions.map(
+        ({ id, icon: ActionIcon, label, onClick, active, disabled }) => (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onClick}
+                disabled={disabled}
+                className={cn(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-accent/15 hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+                  active && "text-emerald-600 dark:text-emerald-400",
+                )}
+                aria-label={label}
+              >
+                {active ? (
+                  <Check className="h-4 w-4" />
+                ) : (
+                  <ActionIcon className="h-4 w-4" strokeWidth={2} />
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{label}</TooltipContent>
+          </Tooltip>
+        ),
+      )}
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      {children}
+    </div>
+  );
+}
+
+function QuoteLines({
+  lines,
+  tone = "blue",
+}: {
+  lines: string[];
+  tone?: Tone;
+}) {
+  const quoteTone = {
+    blue: "text-sky-700 dark:text-sky-300",
+    violet: "text-violet-700 dark:text-violet-300",
+    orange: "text-orange-700 dark:text-orange-300",
+  }[tone];
+
+  return (
+    <div className="space-y-3">
+      {lines.map((line, index) => (
+        <p
+          key={`${line}-${index}`}
+          className="text-[14px] leading-7 text-foreground/90"
+        >
+          <span className={cn("mr-2 font-semibold", quoteTone)}>&gt;</span>
+          {line}
+        </p>
       ))}
     </div>
   );
 }
 
-function Section({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function IssueContent({ data }: { data: WorkNotes }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="h-1 w-1 rounded-full bg-gradient-to-br from-sky-500 via-orange-500 to-violet-500" />
-        {label}
-      </div>
-      <div className="pl-2.5 text-[14px] leading-relaxed text-foreground/90 border-l border-border/60">
-        {children}
-      </div>
+    <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/10 via-background/60 to-transparent p-4">
+      <SectionLabel>Issue</SectionLabel>
+      <QuoteLines lines={quoteLines(data.issue)} tone="blue" />
     </div>
   );
 }
 
-function WorkNotesContent({ data }: { data: WorkNotes }) {
+function TroubleshootingContent({ data }: { data: WorkNotes }) {
   return (
-    <div className="flex flex-col gap-5">
-      <Section label="Issue">
-        <p className="pt-0.5">{data.issue}</p>
-      </Section>
-      <Section label="TS Performed">
-        <ul className="space-y-2 pt-0.5">
-          {data.tsPerformed.map((item, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <span className="mt-[9px] inline-flex h-1.5 w-1.5 shrink-0 items-center justify-center">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-dxc-gradient" />
-              </span>
-              <span className="flex-1">{item}</span>
-            </li>
-          ))}
-        </ul>
-      </Section>
-      <Section label="Output">
-        <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-[13.5px] pt-2.5">
-          {data.output}
-        </div>
-      </Section>
+    <div className="flex h-full flex-col gap-5">
+      <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/10 via-background/60 to-transparent p-4">
+        <SectionLabel>Troubleshooting Performed</SectionLabel>
+        <QuoteLines lines={quoteLines(data.tsPerformed)} tone="violet" />
+      </div>
+
+      <div className="rounded-2xl border border-sky-500/20 bg-gradient-to-br from-sky-500/10 via-background/60 to-transparent p-4">
+        <SectionLabel>Output</SectionLabel>
+        <QuoteLines lines={quoteLines(data.output)} tone="blue" />
+      </div>
     </div>
   );
 }
@@ -276,14 +468,9 @@ function WorkNotesContent({ data }: { data: WorkNotes }) {
 function ResolutionContent({ text }: { text: string }) {
   return (
     <div className="flex h-full flex-col gap-4">
-      <div className="relative flex-1 rounded-2xl border border-orange-500/25 bg-gradient-to-br from-orange-500/10 via-background/40 to-transparent p-5 dark:bg-orange-500/10">
-        <div className="mb-2 flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-wider text-orange-700 dark:text-orange-300">
-          <span className="h-1 w-1 rounded-full bg-dxc-gradient" />
-          ServiceNow Ready
-        </div>
-        <p className="text-[14.5px] leading-[1.75] text-foreground/95">
-          “{text}”
-        </p>
+      <div className="relative flex-1 rounded-2xl border border-orange-500/25 bg-gradient-to-br from-orange-500/10 via-background/60 to-transparent p-5 dark:bg-orange-500/10">
+        <SectionLabel>ServiceNow Ready</SectionLabel>
+        <QuoteLines lines={quoteLines(text)} tone="orange" />
       </div>
       <div className="mt-auto flex items-center justify-between text-[11.5px] text-muted-foreground">
         <div className="flex items-center gap-1.5">
@@ -292,7 +479,7 @@ function ResolutionContent({ text }: { text: string }) {
           </Badge>
           <span>{text.length} chars</span>
         </div>
-        <span>Paste into Resolution Notes field</span>
+        <span>Copies together with Work Notes</span>
       </div>
     </div>
   );
@@ -305,37 +492,33 @@ function SkeletonContent({
   lines: number[];
   paragraph?: boolean;
 }) {
+  const widths = [82, 68, 91, 74, 87, 63];
+
   return (
     <div className="flex flex-col gap-5">
-      {lines.map((len, i) => (
-        <div key={i} className="space-y-1.5">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
-            <span className="h-1 w-1 rounded-full bg-muted-foreground/50" />
-            Section {i + 1}
-          </div>
-          {paragraph ? (
-            <div className="rounded-2xl border border-border/60 bg-muted/20 p-4 space-y-2">
-              {Array.from({ length: 6 }).map((_, idx) => (
-                <div
-                  key={idx}
-                  className="h-2.5 rounded-full bg-muted animate-pulse"
-                  style={{ width: `${65 + Math.random() * 32}%` }}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-2 border-l border-border/50 pl-2.5">
-              {Array.from({ length: Math.max(2, Math.floor(len / 2)) }).map(
-                (_, idx) => (
+      {lines.map((lineCount, sectionIndex) => (
+        <div key={sectionIndex} className="space-y-2">
+          <div className="h-2.5 w-28 rounded-full bg-muted animate-pulse" />
+          <div
+            className={cn(
+              "space-y-2.5 rounded-2xl border border-border/60 bg-muted/20 p-4",
+              paragraph && "min-h-[180px]",
+            )}
+          >
+            {Array.from({ length: Math.max(2, Math.floor(lineCount / 2)) }).map(
+              (_, lineIndex) => (
+                <div key={lineIndex} className="flex items-center gap-2">
+                  <div className="h-2.5 w-2 rounded-full bg-muted-foreground/35 animate-pulse" />
                   <div
-                    key={idx}
                     className="h-2.5 rounded-full bg-muted animate-pulse"
-                    style={{ width: `${55 + Math.random() * 40}%` }}
+                    style={{
+                      width: `${widths[(sectionIndex + lineIndex) % widths.length]}%`,
+                    }}
                   />
-                ),
-              )}
-            </div>
-          )}
+                </div>
+              ),
+            )}
+          </div>
         </div>
       ))}
     </div>
