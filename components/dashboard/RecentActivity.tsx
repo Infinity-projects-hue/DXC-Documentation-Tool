@@ -216,7 +216,7 @@ export function RecentActivity() {
                 </div>
                 <div>
                   <div className="text-sm font-semibold">
-                    You're in the top 12%
+                    You&apos;re in the top 12%
                   </div>
                   <div className="text-[11.5px] text-muted-foreground">
                     of agents this week across EMEA
