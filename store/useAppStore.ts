@@ -8,59 +8,43 @@ export interface WorkNotes {
   issue: string;
   tsPerformed: string[];
   output: string;
-  nextAction: string;
-}
-
-export interface RCA {
-  rootCause: string;
-  impact: string;
-  correctiveAction: string;
-  preventiveAction: string;
 }
 
 export interface DocumentationOutput {
   workNotes: WorkNotes;
   resolutionNotes: string;
-  rca: RCA;
 }
 
 export interface AppState {
   transcript: string;
-  setTranscript: (t: string) => void;
+  setTranscript: (transcript: string) => void;
 
   isGenerating: boolean;
   currentStep: GenerationStep;
   startGeneration: () => void;
-  setStep: (s: GenerationStep) => void;
+  setStep: (step: GenerationStep) => void;
   finishGeneration: () => void;
 
   output: DocumentationOutput | null;
-  setOutput: (o: DocumentationOutput | null) => void;
+  setOutput: (output: DocumentationOutput | null) => void;
 
   editableField:
     | null
     | "workNotes.issue"
     | "workNotes.output"
-    | "workNotes.nextAction"
     | "workNotes.tsPerformed"
-    | "resolutionNotes"
-    | "rca.rootCause"
-    | "rca.impact"
-    | "rca.correctiveAction"
-    | "rca.preventiveAction";
-  setEditableField: (
-    f: AppState["editableField"],
-  ) => void;
+    | "resolutionNotes";
+  setEditableField: (field: AppState["editableField"]) => void;
   updateOutput: (patch: Partial<DocumentationOutput>) => void;
 }
 
 const stepMessages: Record<number, string> = {
-  1: "Reading conversation...",
-  2: "Understanding issue...",
-  3: "Extracting troubleshooting...",
-  4: "Generating Work Notes...",
-  5: "Generating Resolution...",
-  6: "Generating Root Cause Analysis...",
+  1: "Reading interaction...",
+  2: "Understanding the reported issue...",
+  3: "Extracting completed actions...",
+  4: "Building Work Notes...",
+  5: "Building Resolution Notes...",
+  6: "Validating transcript grounding...",
   7: "Completed.",
 };
 
@@ -70,49 +54,37 @@ const emptyWorkNotes: WorkNotes = {
   issue: "",
   tsPerformed: [],
   output: "",
-  nextAction: "",
-};
-
-const emptyRCA: RCA = {
-  rootCause: "",
-  impact: "",
-  correctiveAction: "",
-  preventiveAction: "",
 };
 
 export const useAppStore = create<AppState>((set) => ({
   transcript: "",
-  setTranscript: (t) => set({ transcript: t }),
+  setTranscript: (transcript) => set({ transcript }),
 
   isGenerating: false,
   currentStep: null,
   startGeneration: () => set({ isGenerating: true, currentStep: 1, output: null }),
-  setStep: (s) => set({ currentStep: s }),
+  setStep: (currentStep) => set({ currentStep }),
   finishGeneration: () => set({ isGenerating: false, currentStep: 7 }),
 
   output: null,
-  setOutput: (o) => set({ output: o }),
+  setOutput: (output) => set({ output }),
 
   editableField: null,
-  setEditableField: (f) => set({ editableField: f }),
+  setEditableField: (editableField) => set({ editableField }),
   updateOutput: (patch) =>
-    set((s) => {
-      if (!s.output) return s;
+    set((state) => {
+      if (!state.output) return state;
       return {
         output: {
-          ...s.output,
+          ...state.output,
           ...patch,
           workNotes: {
-            ...s.output.workNotes,
+            ...state.output.workNotes,
             ...(patch.workNotes ?? {}),
-          },
-          rca: {
-            ...s.output.rca,
-            ...(patch.rca ?? {}),
           },
         },
       };
     }),
 }));
 
-export { emptyWorkNotes, emptyRCA };
+export { emptyWorkNotes };
