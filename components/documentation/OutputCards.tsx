@@ -1,22 +1,39 @@
 "use client";
 
 import * as React from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Check,
   ClipboardCheck,
   Copy,
   FileCheck2,
   FileText,
-  Layers3,
-  ShieldCheck,
-  Sparkles,
+  LoaderCircle,
+  Rows3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppStore, type DocumentationOutput } from "@/store/useAppStore";
 
-function normalize(value: string): string {
-  return value.trim().replace(/\s+/g, " ");
+function sentenceLines(value: string | string[]): string[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values
+    .flatMap((item) =>
+      item
+        .replace(/\r/g, "")
+        .split(/\n+/)
+        .flatMap((line) => line.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? [line]),
+    )
+    .map((line) =>
+      line
+        .trim()
+        .replace(/^\s*(?:[>•*\-]|\d+[.)])\s*/, "")
+        .replace(/\s+/g, " "),
+    )
+    .filter(Boolean);
+}
+
+function quoteLines(lines: string[]): string[] {
+  return lines.map((line) => `> ${line}`);
 }
 
 function workNotesText(output: DocumentationOutput): string {
@@ -24,18 +41,22 @@ function workNotesText(output: DocumentationOutput): string {
     "WORK NOTES",
     "",
     "Issue:",
-    normalize(output.workNotes.issue),
+    ...quoteLines(sentenceLines(output.workNotes.issue)),
     "",
-    "Troubleshooting / Actions Performed:",
-    ...output.workNotes.tsPerformed.map(normalize),
+    "TS Performed:",
+    ...quoteLines(sentenceLines(output.workNotes.tsPerformed)),
     "",
-    "Outcome:",
-    normalize(output.workNotes.output),
+    "Output:",
+    ...quoteLines(sentenceLines(output.workNotes.output)),
   ].join("\n");
 }
 
 function resolutionText(output: DocumentationOutput): string {
-  return ["RESOLUTION NOTES", "", normalize(output.resolutionNotes)].join("\n");
+  return [
+    "RESOLUTION NOTES",
+    "",
+    ...quoteLines(sentenceLines(output.resolutionNotes)),
+  ].join("\n");
 }
 
 function allNotesText(output: DocumentationOutput): string {
@@ -59,14 +80,17 @@ async function writeClipboard(text: string) {
   document.body.removeChild(textarea);
 }
 
+type CopyTarget = "work" | "resolution" | "all";
+
 export function OutputCards() {
   const output = useAppStore((state) => state.output);
   const isGenerating = useAppStore((state) => state.isGenerating);
-  const [copied, setCopied] = React.useState<"work" | "resolution" | "all" | null>(null);
+  const [copied, setCopied] = React.useState<CopyTarget | null>(null);
 
   const copy = React.useCallback(
-    async (target: "work" | "resolution" | "all") => {
+    async (target: CopyTarget) => {
       if (!output) return;
+
       const text =
         target === "work"
           ? workNotesText(output)
@@ -87,27 +111,27 @@ export function OutputCards() {
 
   return (
     <motion.section
-      initial={{ opacity: 0, y: 18 }}
+      initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, delay: 0.06, ease: "easeOut" }}
-      className="relative isolate min-h-[640px] overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.045] shadow-[0_32px_100px_-48px_rgba(0,0,0,0.95)] backdrop-blur-2xl"
+      transition={{ duration: 0.5, ease: "easeOut" }}
+      className="relative min-h-[640px] overflow-hidden rounded-[24px] border border-slate-800 bg-[#090d14] shadow-[0_24px_70px_-42px_rgba(0,0,0,0.95)]"
       aria-labelledby="results-heading"
     >
-      <ResultsBackdrop />
+      <TechnicalBackdrop />
 
       <div className="relative z-10 flex min-h-[640px] flex-col p-5 sm:p-6 lg:p-7">
-        <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.055]">
-                <Layers3 className="h-4.5 w-4.5 text-blue-300" strokeWidth={1.8} />
-              </div>
-              <div>
-                <h2 id="results-heading" className="text-base font-semibold tracking-tight text-white sm:text-lg">
-                  Generated Notes
-                </h2>
-                <p className="mt-0.5 text-xs text-slate-400">Professional, transcript-grounded ITSM documentation.</p>
-              </div>
+        <div className="mb-5 flex flex-col gap-4 border-b border-slate-800 pb-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-blue-400/25 bg-blue-400/[0.06]">
+              <Rows3 className="h-4.5 w-4.5 text-blue-300" strokeWidth={1.8} />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">
+                Documentation record
+              </p>
+              <h2 id="results-heading" className="mt-1 text-lg font-semibold tracking-tight text-white">
+                Generated Notes
+              </h2>
             </div>
           </div>
 
@@ -115,7 +139,7 @@ export function OutputCards() {
             type="button"
             onClick={() => void copy("all")}
             disabled={!output || isGenerating}
-            className="h-11 rounded-2xl border border-orange-300/20 bg-gradient-to-r from-orange-500 via-rose-500 to-violet-600 px-5 font-semibold text-white shadow-[0_16px_34px_-20px_rgba(249,115,22,0.9)] hover:brightness-110 focus-visible:ring-2 focus-visible:ring-orange-300/60 disabled:opacity-35"
+            className="h-11 rounded-xl border border-orange-300/30 bg-orange-500 px-5 font-semibold text-[#111318] shadow-none hover:bg-orange-400 focus-visible:ring-2 focus-visible:ring-orange-300/70 disabled:opacity-35"
           >
             {copied === "all" ? <Check className="h-4 w-4" /> : <ClipboardCheck className="h-4 w-4" />}
             {copied === "all" ? "Copied successfully" : "Copy All Notes"}
@@ -126,9 +150,9 @@ export function OutputCards() {
           {isGenerating ? (
             <motion.div
               key="loading"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               className="flex flex-1 items-center justify-center"
             >
               <AnalysisLoader />
@@ -136,14 +160,15 @@ export function OutputCards() {
           ) : output ? (
             <motion.div
               key="results"
-              initial={{ opacity: 0, y: 18 }}
+              initial={{ opacity: 0, y: 14 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              transition={{ duration: 0.5, ease: "easeOut" }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.45, ease: "easeOut" }}
               className="flex flex-1 flex-col gap-4"
             >
-              <NotesCard
+              <RecordCard
                 title="Work Notes"
+                code="WN"
                 icon={FileText}
                 accent="blue"
                 action={
@@ -154,33 +179,19 @@ export function OutputCards() {
                   />
                 }
               >
-                <NoteSection label="Issue">
-                  <p>{output.workNotes.issue}</p>
-                </NoteSection>
+                <RecordRow index="01" label="Issue" lines={sentenceLines(output.workNotes.issue)} accent="blue" />
+                <RecordRow
+                  index="02"
+                  label="TS Performed"
+                  lines={sentenceLines(output.workNotes.tsPerformed)}
+                  accent="orange"
+                />
+                <RecordRow index="03" label="Output" lines={sentenceLines(output.workNotes.output)} accent="blue" last />
+              </RecordCard>
 
-                <NoteSection label="Troubleshooting / Actions Performed">
-                  <div className="space-y-2.5">
-                    {output.workNotes.tsPerformed.map((action, index) => (
-                      <motion.p
-                        key={`${action}-${index}`}
-                        initial={{ opacity: 0, x: -8 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.08 + index * 0.035 }}
-                        className="border-l border-violet-400/25 pl-3"
-                      >
-                        {action}
-                      </motion.p>
-                    ))}
-                  </div>
-                </NoteSection>
-
-                <NoteSection label="Outcome">
-                  <p>{output.workNotes.output}</p>
-                </NoteSection>
-              </NotesCard>
-
-              <NotesCard
+              <RecordCard
                 title="Resolution Notes"
+                code="RN"
                 icon={FileCheck2}
                 accent="orange"
                 action={
@@ -191,8 +202,14 @@ export function OutputCards() {
                   />
                 }
               >
-                <p className="text-[15px] leading-7 text-slate-200">{output.resolutionNotes}</p>
-              </NotesCard>
+                <RecordRow
+                  index="04"
+                  label="Resolution"
+                  lines={sentenceLines(output.resolutionNotes)}
+                  accent="orange"
+                  last
+                />
+              </RecordCard>
             </motion.div>
           ) : (
             <motion.div
@@ -212,10 +229,10 @@ export function OutputCards() {
         {copied && (
           <motion.div
             role="status"
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
+            initial={{ opacity: 0, y: 12, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.96 }}
-            className="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-300/20 bg-[#0d1716]/90 px-4 py-2.5 text-xs font-medium text-emerald-200 shadow-2xl backdrop-blur-xl"
+            exit={{ opacity: 0, y: 8, scale: 0.97 }}
+            className="absolute bottom-5 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full border border-emerald-300/25 bg-[#0d1716] px-4 py-2.5 text-xs font-medium text-emerald-200 shadow-2xl"
           >
             <Check className="h-3.5 w-3.5" />
             Copied successfully
@@ -226,57 +243,94 @@ export function OutputCards() {
   );
 }
 
-type NotesCardProps = {
+function TechnicalBackdrop() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(148,163,184,0.42)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.42)_1px,transparent_1px)] [background-size:32px_32px]" />
+      <div className="absolute left-0 top-0 h-full w-px bg-blue-400/30" />
+      <div className="absolute right-0 top-0 h-28 w-px bg-orange-400/40" />
+      <div className="absolute right-0 top-0 h-px w-28 bg-orange-400/40" />
+      <div className="absolute bottom-0 left-0 h-20 w-px bg-blue-400/25" />
+      <div className="absolute bottom-0 left-0 h-px w-20 bg-blue-400/25" />
+    </div>
+  );
+}
+
+type RecordCardProps = {
   title: string;
+  code: string;
   icon: React.ElementType;
   accent: "blue" | "orange";
   action: React.ReactNode;
   children: React.ReactNode;
 };
 
-function NotesCard({ title, icon: Icon, accent, action, children }: NotesCardProps) {
-  const tones =
+function RecordCard({ title, code, icon: Icon, accent, action, children }: RecordCardProps) {
+  const tone =
     accent === "blue"
-      ? {
-          icon: "text-blue-300",
-          glow: "from-blue-500/15 via-violet-500/5 to-transparent",
-          line: "via-blue-300/60",
-        }
-      : {
-          icon: "text-orange-300",
-          glow: "from-orange-500/15 via-rose-500/5 to-transparent",
-          line: "via-orange-300/60",
-        };
+      ? "border-blue-400/20 bg-blue-400/[0.04] text-blue-300"
+      : "border-orange-400/20 bg-orange-400/[0.04] text-orange-300";
 
   return (
     <motion.article
-      whileHover={{ y: -3, rotateX: 0.35, rotateY: -0.3 }}
-      transition={{ duration: 0.25 }}
-      className="group relative overflow-hidden rounded-[22px] border border-white/10 bg-[#0b101a]/75 shadow-[0_18px_54px_-34px_rgba(0,0,0,0.95)] [transform-style:preserve-3d]"
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.22 }}
+      className="overflow-hidden rounded-[20px] border border-slate-800 bg-[#0c111a]"
     >
-      <div aria-hidden className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${tones.glow}`} />
-      <div aria-hidden className={`pointer-events-none absolute inset-x-12 top-0 h-px bg-gradient-to-r from-transparent ${tones.line} to-transparent`} />
-      <div className="relative z-10 border-b border-white/[0.07] px-5 py-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.045]">
-              <Icon className={`h-4.5 w-4.5 ${tones.icon}`} strokeWidth={1.8} />
-            </div>
-            <h3 className="font-semibold tracking-tight text-white">{title}</h3>
+      <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-4 py-4 sm:px-5">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-9 w-9 items-center justify-center rounded-lg border ${tone}`}>
+            <Icon className="h-4.5 w-4.5" strokeWidth={1.8} />
           </div>
-          {action}
+          <div className="flex items-baseline gap-3">
+            <h3 className="font-semibold tracking-tight text-white">{title}</h3>
+            <span className="font-mono text-[10px] font-semibold tracking-[0.18em] text-slate-600">{code}</span>
+          </div>
         </div>
+        {action}
       </div>
-      <div className="relative z-10 space-y-5 px-5 py-5 text-sm leading-6 text-slate-300">{children}</div>
+      <div>{children}</div>
     </motion.article>
   );
 }
 
-function NoteSection({ label, children }: { label: string; children: React.ReactNode }) {
+function RecordRow({
+  index,
+  label,
+  lines,
+  accent,
+  last = false,
+}: {
+  index: string;
+  label: string;
+  lines: string[];
+  accent: "blue" | "orange";
+  last?: boolean;
+}) {
+  const quoteTone = accent === "blue" ? "text-blue-300" : "text-orange-300";
+
   return (
-    <section>
-      <h4 className="mb-2.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-slate-500">{label}</h4>
-      <div className="text-[14px] leading-[1.7] text-slate-300">{children}</div>
+    <section
+      className={`grid gap-3 px-4 py-5 sm:px-5 md:grid-cols-[42px_150px_minmax(0,1fr)] md:gap-4 ${
+        last ? "" : "border-b border-slate-800"
+      }`}
+    >
+      <span className="font-mono text-[10px] font-semibold tracking-[0.14em] text-slate-600">{index}</span>
+      <h4 className="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">{label}</h4>
+      <div className="space-y-2.5">
+        {lines.map((line, lineIndex) => (
+          <motion.p
+            key={`${index}-${lineIndex}-${line}`}
+            initial={{ opacity: 0, x: -6 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: lineIndex * 0.025 }}
+            className="grid grid-cols-[18px_minmax(0,1fr)] gap-2 text-[14px] leading-6 text-slate-300"
+          >
+            <span className={`font-mono font-bold ${quoteTone}`}>&gt;</span>
+            <span>{line}</span>
+          </motion.p>
+        ))}
+      </div>
     </section>
   );
 }
@@ -287,7 +341,7 @@ function CopyButton({ label, copied, onClick }: { label: string; copied: boolean
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="inline-flex h-9 items-center gap-2 rounded-xl border border-white/10 bg-white/[0.045] px-3 text-xs font-medium text-slate-300 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
+      className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-700 bg-[#111823] px-3 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:bg-[#151e2b] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
       <span className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
@@ -298,84 +352,43 @@ function CopyButton({ label, copied, onClick }: { label: string; copied: boolean
 function EmptyState() {
   return (
     <div className="mx-auto max-w-sm px-5 text-center">
-      <div className="relative mx-auto mb-7 h-36 w-36 [perspective:700px]" aria-hidden>
-        <motion.div
-          className="absolute inset-3 rounded-[34px] border border-blue-300/25 bg-gradient-to-br from-blue-500/10 via-violet-500/5 to-orange-400/10 shadow-[0_0_70px_rgba(59,130,246,0.14)] [transform-style:preserve-3d]"
-          animate={{ rotateX: [58, 68, 58], rotateZ: [-8, 8, -8], y: [0, -5, 0] }}
-          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut" }}
-        />
-        <motion.div
-          className="absolute inset-8 rounded-[24px] border border-orange-300/30 bg-black/30 [transform-style:preserve-3d]"
-          animate={{ rotateY: [0, 180, 360], rotateX: [20, -20, 20] }}
-          transition={{ duration: 9, repeat: Infinity, ease: "linear" }}
-        />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Sparkles className="h-7 w-7 text-white/80" strokeWidth={1.5} />
-        </div>
+      <div className="relative mx-auto mb-6 flex h-28 w-28 items-center justify-center" aria-hidden>
+        <div className="absolute inset-0 rounded-[24px] border border-slate-700 bg-[#0c111a]" />
+        <div className="absolute inset-4 rounded-[16px] border border-blue-400/25" />
+        <div className="absolute left-6 right-6 top-1/2 h-px bg-orange-400/50" />
+        <FileText className="relative h-7 w-7 text-slate-300" strokeWidth={1.5} />
       </div>
-      <h3 className="text-lg font-semibold text-white">Your notes will appear here</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">
-        Paste a complete customer interaction and select Analyze Interaction to generate grounded Work Notes and Resolution Notes.
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-300">Awaiting analysis</p>
+      <h3 className="mt-3 text-lg font-semibold text-white">Your documentation will appear here</h3>
+      <p className="mt-2 text-sm leading-6 text-slate-500">
+        Paste an interaction on the left and run the analyzer to create Work Notes and Resolution Notes.
       </p>
-      <div className="mt-5 flex flex-wrap justify-center gap-2 text-[11px] text-slate-500">
-        <span className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5">No invented actions</span>
-        <span className="rounded-full border border-white/10 bg-white/[0.035] px-3 py-1.5">ServiceNow ready</span>
-      </div>
     </div>
   );
 }
 
 function AnalysisLoader() {
-  return (
-    <div className="max-w-sm px-5 text-center">
-      <div className="relative mx-auto mb-8 h-44 w-44 [perspective:900px]" aria-hidden>
-        <motion.div
-          className="absolute inset-3 rounded-full border border-blue-300/35"
-          animate={{ rotateX: [0, 70, 0], rotateY: [0, 180, 360] }}
-          transition={{ duration: 4.2, repeat: Infinity, ease: "linear" }}
-        />
-        <motion.div
-          className="absolute inset-7 rounded-full border border-violet-300/35"
-          animate={{ rotateX: [75, 0, 75], rotateZ: [0, -180, -360] }}
-          transition={{ duration: 3.4, repeat: Infinity, ease: "linear" }}
-        />
-        <motion.div
-          className="absolute inset-11 rounded-full border border-orange-300/45"
-          animate={{ rotateY: [70, 0, 70], rotateZ: [0, 180, 360] }}
-          transition={{ duration: 2.9, repeat: Infinity, ease: "linear" }}
-        />
-        <motion.div
-          className="absolute left-1/2 top-1/2 h-14 w-14 -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-gradient-to-br from-blue-500 via-violet-500 to-orange-400 shadow-[0_0_65px_rgba(99,102,241,0.7)]"
-          animate={{ rotate: [0, 90, 180, 270, 360], scale: [0.92, 1.06, 0.92] }}
-          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-        />
-      </div>
-      <h3 className="text-lg font-semibold text-white">Building support documentation</h3>
-      <p className="mt-2 text-sm leading-6 text-slate-400">
-        Extracting the reported issue, verified actions, observed outcome, and concise resolution.
-      </p>
-      <div className="mt-5 flex items-center justify-center gap-2 text-xs text-blue-300">
-        <ShieldCheck className="h-4 w-4" />
-        Grounded only in the supplied transcript
-      </div>
-    </div>
-  );
-}
+  const reduceMotion = useReducedMotion();
 
-function ResultsBackdrop() {
   return (
-    <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-      <motion.div
-        className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-violet-600/10 blur-3xl"
-        animate={{ x: [0, -24, 0], y: [0, 20, 0], scale: [0.95, 1.08, 0.95] }}
-        transition={{ duration: 13, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-orange-500/10 blur-3xl"
-        animate={{ x: [0, 28, 0], y: [0, -18, 0], scale: [1.05, 0.92, 1.05] }}
-        transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <div className="absolute inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(255,255,255,0.32)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.32)_1px,transparent_1px)] [background-size:44px_44px] [mask-image:linear-gradient(to_bottom,black,transparent_85%)]" />
+    <div className="text-center">
+      <div className="relative mx-auto mb-7 flex h-32 w-32 items-center justify-center" aria-hidden>
+        <motion.div
+          className="absolute inset-0 rounded-[28px] border border-blue-400/30"
+          animate={reduceMotion ? undefined : { rotate: 360 }}
+          transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+        />
+        <motion.div
+          className="absolute inset-4 rounded-[20px] border border-orange-400/35"
+          animate={reduceMotion ? undefined : { rotate: -360 }}
+          transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+        />
+        <LoaderCircle className="h-8 w-8 text-white" strokeWidth={1.4} />
+      </div>
+      <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-orange-300">
+        Processing interaction
+      </p>
+      <p className="mt-3 text-sm text-slate-500">Extracting only documented actions and confirmed status.</p>
     </div>
   );
 }
