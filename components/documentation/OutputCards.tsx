@@ -18,7 +18,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -77,23 +76,21 @@ export function OutputCards() {
         <AnimatePresence mode="popLayout">
           {(showSkeleton || showOutput) && (
             <>
-              {/* Work Notes - takes 3 cols, full content layout with Issue > TS Performed > Output > Next Action */}
               <OutputCardWrapper
                 key="work-notes"
                 title="Work Notes"
                 icon={FileCog}
                 tone="blue"
-                description="Issue · TS Performed · Output · Next Action — ready to paste"
+                description="Issue · TS Performed · Output — ready to paste"
                 className="xl:col-span-3"
               >
                 {showOutput ? (
                   <WorkNotesContent data={output.workNotes} />
                 ) : (
-                  <SkeletonContent lines={[7, 5, 6, 5]} />
+                  <SkeletonContent lines={[7, 5, 6]} />
                 )}
               </OutputCardWrapper>
 
-              {/* Resolution Notes - takes 2 cols as separate box */}
               <OutputCardWrapper
                 key="resolution"
                 title="Resolution Notes"
@@ -270,11 +267,6 @@ function WorkNotesContent({ data }: { data: WorkNotes }) {
       <Section label="Output">
         <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-[13.5px] pt-2.5">
           {data.output}
-        </div>
-      </Section>
-      <Section label="Next Action">
-        <div className="rounded-xl border border-sky-500/25 bg-gradient-to-br from-sky-500/10 via-sky-500/5 to-transparent p-3 text-[13.5px] pt-2.5 dark:bg-sky-500/10">
-          {data.nextAction}
         </div>
       </Section>
     </div>
