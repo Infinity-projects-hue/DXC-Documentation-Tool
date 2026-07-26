@@ -1,8 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { motion } from "framer-motion";
-import { Mail, BookOpenCheck, FileDown, FileText, Save } from "lucide-react";
+import { Mail, BookOpenCheck, FileDown, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAppStore } from "@/store/useAppStore";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +39,7 @@ export function GlobalActionsBar() {
             )}
           >
             {output && !isGenerating
-              ? "Work Notes and Resolution Notes generated. Export or save below."
+              ? "Work Notes and Resolution Notes generated. Export below."
               : "Paste a transcript and click Analyze Documentation to begin."}
           </span>
         </div>
@@ -85,16 +84,6 @@ export function GlobalActionsBar() {
             <FileDown className="h-4 w-4" strokeWidth={2} />
             <span className="hidden sm:inline">Export PDF</span>
             <span className="sm:hidden">PDF</span>
-          </Button>
-          <Button
-            size="sm"
-            variant="gradient"
-            disabled={disabled}
-            className="shrink-0"
-          >
-            <Save className="h-4 w-4" strokeWidth={2} />
-            <span className="hidden sm:inline">Save to History</span>
-            <span className="sm:hidden">Save</span>
           </Button>
         </div>
       </div>
