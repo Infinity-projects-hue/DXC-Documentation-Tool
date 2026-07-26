@@ -41,6 +41,7 @@ const ACTION_VERBS = [
   "created",
   "modified",
   "confirmed",
+  "performed",
 ];
 
 const RESOLUTION_MARKERS = [
@@ -52,11 +53,13 @@ const RESOLUTION_MARKERS = [
   "successfully",
   "no longer",
   "no prompt",
+  "no popup",
   "connected",
   "restored",
   "synchronized",
   "synced",
   "able to",
+  "flowing",
 ];
 
 function normalizeLine(line: string): string {
@@ -109,6 +112,10 @@ export function analyzeTranscriptLocally(transcript: string): AnalyzerOutput {
     .filter((line) => /^(?:\s*\[[^\]]+\]\s*)?(user|customer|caller|client)(\s*\([^)]*\))?\s*:/i.test(line))
     .map(normalizeLine)
     .filter((line) => !isLikelyGreeting(line));
+  const agentLines = rawLines
+    .filter((line) => /^(?:\s*\[[^\]]+\]\s*)?(agent|analyst|technician|support|engineer)(\s*\([^)]*\))?\s*:/i.test(line))
+    .map(normalizeLine)
+    .filter((line) => !isLikelyGreeting(line));
 
   const issueCandidates = uniqueSentences(
     (userLines.length ? userLines : normalized)
@@ -125,8 +132,9 @@ export function analyzeTranscriptLocally(transcript: string): AnalyzerOutput {
     issueCandidates.slice(0, 2).join(" ") ||
     ensureSentence(userLines[0] || normalized[0] || "The reported issue could not be determined from the transcript");
 
+  const actionSource = agentLines.length ? agentLines : normalized;
   const actionCandidates = uniqueSentences(
-    normalized
+    actionSource
       .flatMap(splitSentences)
       .filter((line) => {
         if (isLikelyGreeting(line)) return false;
@@ -137,27 +145,46 @@ export function analyzeTranscriptLocally(transcript: string): AnalyzerOutput {
       .map(ensureSentence),
   );
 
-  const resolutionCandidates = uniqueSentences(
-    normalized
-      .flatMap(splitSentences)
-      .filter((line) => {
-        const lower = line.toLowerCase();
-        if (
-          /(not working|not resolved|still failing|still unable|unable to|cannot|can't|failed|failure|error|disconnected|no access|did not work)/i.test(
-            lower,
-          )
-        ) {
-          return false;
-        }
+  const hasConfirmedOutcome = (line: string) => {
+    const lower = line.toLowerCase();
+    if (
+      /(not working|not resolved|still failing|still unable|unable to|cannot|can't|failed|failure|error|disconnected|no access|did not work)/i.test(
+        lower,
+      )
+    ) {
+      return false;
+    }
 
-        return RESOLUTION_MARKERS.some((marker) =>
-          marker.includes(" ")
-            ? lower.includes(marker)
-            : new RegExp(`\\b${marker}\\b`, "i").test(lower),
-        );
-      })
-      .filter((line) => !isLikelyGreeting(line))
-      .map(ensureSentence),
+    return RESOLUTION_MARKERS.some((marker) =>
+      marker.includes(" ")
+        ? lower.includes(marker)
+        : new RegExp(`\\b${marker}\\b`, "i").test(lower),
+    );
+  };
+
+  const userOutcomeCandidates = userLines
+    .flatMap(splitSentences)
+    .filter(hasConfirmedOutcome);
+  const agentOutcomeCandidates = agentLines
+    .flatMap(splitSentences)
+    .filter((line) =>
+      hasConfirmedOutcome(line) &&
+      /(confirmed|verified|validated|resolved|restored|successful|successfully)/i.test(line),
+    );
+  const fallbackOutcomeCandidates = normalized
+    .flatMap(splitSentences)
+    .filter(hasConfirmedOutcome);
+
+  const resolutionCandidates = uniqueSentences(
+    (
+      userOutcomeCandidates.length
+        ? userOutcomeCandidates
+        : agentOutcomeCandidates.length
+          ? agentOutcomeCandidates
+          : userLines.length || agentLines.length
+            ? []
+            : fallbackOutcomeCandidates
+    ).map(ensureSentence),
   );
 
   const confirmed = resolutionCandidates.length > 0;
