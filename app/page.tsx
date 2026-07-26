@@ -2,7 +2,7 @@
 
 import type { ElementType, ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { FileCheck2, ScanText, ShieldCheck } from "lucide-react";
+import { BadgeCheck, ScanText, ShieldCheck, Sparkles } from "lucide-react";
 import { InputCard } from "@/components/documentation/InputCard";
 import { OutputCards } from "@/components/documentation/OutputCards";
 
@@ -10,32 +10,32 @@ export default function HomeWorkspacePage() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <div className="relative isolate min-h-[calc(100vh-82px)] overflow-hidden bg-[#07090d]">
-      <OperationsBackground reducedMotion={Boolean(reduceMotion)} />
+    <div className="relative isolate min-h-[calc(100vh-76px)] overflow-hidden bg-[#f3efea]">
+      <ReferenceGradientBackground reducedMotion={Boolean(reduceMotion)} />
 
-      <section className="relative z-10 mx-auto w-full max-w-[1680px] px-4 pb-12 pt-10 sm:px-6 sm:pt-12 lg:px-8 lg:pb-16">
+      <section className="relative z-10 mx-auto w-full max-w-[1680px] px-4 pb-10 pt-10 sm:px-6 sm:pt-14 lg:px-8 lg:pb-14">
         <motion.div
-          initial={{ opacity: 0, y: 16 }}
+          initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.55, ease: "easeOut" }}
-          className="mb-8 grid gap-6 border-b border-slate-800 pb-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end"
+          transition={{ duration: 0.65, ease: "easeOut" }}
+          className="mb-8 max-w-4xl lg:mb-10"
         >
-          <div className="max-w-4xl">
-            <p className="font-mono text-[10px] font-bold uppercase tracking-[0.22em] text-orange-300">
-              DXC / Support documentation engine
-            </p>
-            <h1 className="mt-4 max-w-3xl text-balance text-4xl font-semibold leading-[1.05] tracking-[-0.045em] text-white sm:text-5xl lg:text-[62px]">
-              AI Interaction Analyzer
-            </h1>
-            <p className="mt-5 max-w-2xl text-base leading-7 text-slate-400 sm:text-lg">
-              Convert customer interactions into clear Work Notes and Resolution Notes.
-            </p>
+          <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#ddd4cb] bg-white/70 px-3.5 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-700 shadow-[0_12px_32px_-24px_rgba(25,38,67,0.28)] backdrop-blur-xl">
+            <ScanText className="h-3.5 w-3.5 text-[#f08e56]" />
+            Support interaction intelligence
           </div>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-1">
-            <StatusBlock icon={ShieldCheck} code="01">Transcript grounded</StatusBlock>
-            <StatusBlock icon={FileCheck2} code="02">ServiceNow ready</StatusBlock>
-            <StatusBlock icon={ScanText} code="03">Two outputs only</StatusBlock>
+          <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.03] tracking-[-0.045em] text-slate-900 sm:text-5xl lg:text-[64px]">
+            AI Interaction <span className="bg-[linear-gradient(135deg,#5c8ff3_0%,#f7944d_52%,#8e8fe2_100%)] bg-clip-text text-transparent">Analyzer</span>
+          </h1>
+          <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
+            Convert customer interactions into clear work notes and resolution notes.
+          </p>
+
+          <div className="mt-6 flex flex-wrap gap-2.5">
+            <FeaturePill icon={ShieldCheck}>Transcript-grounded</FeaturePill>
+            <FeaturePill icon={BadgeCheck}>ServiceNow ready</FeaturePill>
+            <FeaturePill icon={Sparkles}>DXC-inspired interface</FeaturePill>
           </div>
         </motion.div>
 
@@ -48,38 +48,42 @@ export default function HomeWorkspacePage() {
   );
 }
 
-function StatusBlock({ icon: Icon, code, children }: { icon: ElementType; code: string; children: ReactNode }) {
+function FeaturePill({ icon: Icon, children }: { icon: ElementType; children: ReactNode }) {
   return (
-    <div className="grid min-w-[190px] grid-cols-[30px_1fr] items-center gap-3 rounded-xl border border-slate-800 bg-[#0a0f17] px-3 py-2.5">
-      <span className="font-mono text-[10px] font-bold tracking-[0.14em] text-slate-600">{code}</span>
-      <span className="inline-flex items-center gap-2 text-xs font-medium text-slate-400">
-        <Icon className="h-3.5 w-3.5 text-blue-300" strokeWidth={1.8} />
-        {children}
-      </span>
-    </div>
+    <span className="inline-flex items-center gap-2 rounded-full border border-[#ddd4cb] bg-white/72 px-3.5 py-2 text-xs text-slate-600 shadow-[0_12px_32px_-24px_rgba(25,38,67,0.28)] backdrop-blur-xl">
+      <Icon className="h-3.5 w-3.5 text-[#f08e56]" strokeWidth={1.8} />
+      {children}
+    </span>
   );
 }
 
-function OperationsBackground({ reducedMotion }: { reducedMotion: boolean }) {
+function ReferenceGradientBackground({ reducedMotion }: { reducedMotion: boolean }) {
+  const transition = reducedMotion
+    ? { duration: 0 }
+    : { duration: 20, repeat: Infinity, ease: "easeInOut" as const };
+
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute inset-0 bg-[linear-gradient(180deg,#07090d_0%,#080b11_55%,#07090d_100%)]" />
-      <div className="absolute inset-0 opacity-[0.055] [background-image:linear-gradient(rgba(148,163,184,0.32)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.32)_1px,transparent_1px)] [background-size:48px_48px] [mask-image:linear-gradient(to_bottom,black,transparent_92%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(180deg,#f6f2ed_0%,#f2ece7_100%)]" />
+      <div className="absolute inset-0 opacity-[0.28] [background-image:radial-gradient(circle_at_14%_34%,rgba(248,159,87,0.28),transparent_22%),radial-gradient(circle_at_66%_30%,rgba(114,146,243,0.22),transparent_18%),radial-gradient(circle_at_54%_72%,rgba(245,149,88,0.22),transparent_18%),radial-gradient(circle_at_78%_34%,rgba(142,143,226,0.16),transparent_16%)]" />
 
       <motion.div
-        className="absolute -left-36 top-28 h-px w-[48rem] origin-left bg-gradient-to-r from-blue-400/0 via-blue-400/40 to-transparent"
-        animate={reducedMotion ? undefined : { scaleX: [0.75, 1, 0.75], opacity: [0.3, 0.75, 0.3] }}
-        transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
-      />
-      <motion.div
-        className="absolute -right-36 top-[22rem] h-px w-[44rem] origin-right bg-gradient-to-l from-orange-400/0 via-orange-400/35 to-transparent"
-        animate={reducedMotion ? undefined : { scaleX: [1, 0.72, 1], opacity: [0.25, 0.65, 0.25] }}
-        transition={{ duration: 10, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute left-[-10%] top-[22%] h-[420px] w-[88%] rounded-[42px] bg-[radial-gradient(circle_at_14%_46%,rgba(248,165,94,0.86),rgba(244,138,107,0.78)_28%,rgba(160,138,207,0.42)_52%,rgba(92,143,243,0.82)_78%,rgba(145,207,219,0.38)_100%)] blur-[38px] opacity-75"
+        animate={reducedMotion ? undefined : { x: [0, 26, 0], y: [0, -10, 0], scale: [1, 1.02, 1] }}
+        transition={transition}
       />
 
-      <div className="absolute left-[7%] top-[18%] h-36 w-36 border-l border-t border-blue-400/10" />
-      <div className="absolute bottom-[12%] right-[8%] h-44 w-44 border-b border-r border-orange-400/10" />
-      <div className="absolute inset-x-0 top-0 h-80 bg-[radial-gradient(circle_at_50%_-30%,rgba(59,130,246,0.12),transparent_55%)]" />
+      <motion.div
+        className="absolute left-[18%] bottom-[-14%] h-[280px] w-[44%] rounded-[46%] bg-[radial-gradient(circle_at_50%_40%,rgba(247,165,77,0.86),rgba(247,148,77,0.52)_56%,transparent_74%)] blur-[56px] opacity-80"
+        animate={reducedMotion ? undefined : { x: [0, 24, 0], y: [0, -18, 0] }}
+        transition={{ ...transition, duration: 23 }}
+      />
+
+      <motion.div
+        className="absolute right-[3%] top-[26%] h-[240px] w-[240px] rounded-full bg-[radial-gradient(circle_at_center,rgba(92,143,243,0.58),rgba(147,205,219,0.24)_58%,transparent_78%)] blur-[34px] opacity-75"
+        animate={reducedMotion ? undefined : { x: [0, -18, 0], y: [0, 16, 0] }}
+        transition={{ ...transition, duration: 17 }}
+      />
     </div>
   );
 }
