@@ -1,44 +1,53 @@
 "use client";
 
+import type { ElementType, ReactNode } from "react";
 import { motion } from "framer-motion";
-import { LockKeyhole, Sparkles } from "lucide-react";
+import { FileCheck2, ShieldCheck } from "lucide-react";
 import { DxcLogo } from "@/components/brand/DxcLogo";
 
 export function AppHeader() {
   return (
     <motion.header
-      initial={{ opacity: 0, y: -16 }}
+      initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.6, ease: "easeOut" }}
-      className="sticky top-0 z-50 border-b border-white/[0.07] bg-[#070a11]/75 backdrop-blur-2xl"
+      transition={{ duration: 0.5, ease: "easeOut" }}
+      className="sticky top-0 z-50 border-b border-slate-800 bg-[#07090d]/95 backdrop-blur-xl"
     >
-      <div className="mx-auto flex h-[72px] w-full max-w-[1680px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
-        <div className="flex min-w-0 items-center gap-3.5">
+      <div className="mx-auto flex min-h-[82px] w-full max-w-[1680px] items-center justify-between gap-4 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="flex min-w-0 items-center gap-4">
           <motion.div
-            whileHover={{ rotateY: 7, scale: 1.025 }}
-            transition={{ duration: 0.25 }}
-            className="relative flex h-11 w-[116px] shrink-0 items-center rounded-2xl border border-white/10 bg-white/[0.045] px-3 shadow-[0_12px_30px_-18px_rgba(59,130,246,0.75)] [perspective:500px]"
+            whileHover={{ y: -1 }}
+            transition={{ duration: 0.2 }}
+            className="flex h-[58px] w-[176px] shrink-0 items-center justify-center rounded-xl border border-white/15 bg-[#f4f1eb] px-3 py-2 shadow-[0_12px_28px_-18px_rgba(0,0,0,0.8)]"
           >
-            <div aria-hidden className="absolute inset-x-4 bottom-0 h-px bg-gradient-to-r from-transparent via-orange-300/70 to-transparent" />
-            <DxcLogo className="h-8 w-auto" />
+            <DxcLogo className="h-auto w-full object-contain" />
           </motion.div>
-          <div className="hidden h-8 w-px bg-gradient-to-b from-transparent via-white/15 to-transparent sm:block" />
+
+          <div className="hidden h-10 w-px bg-slate-800 sm:block" />
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold tracking-tight text-white sm:text-[15px]">AI Interaction Analyzer</p>
-            <p className="hidden truncate text-[11px] text-slate-500 sm:block">Enterprise support documentation</p>
+            <p className="truncate font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-orange-300">
+              Support operations console
+            </p>
+            <p className="mt-1 truncate text-sm font-semibold tracking-tight text-white sm:text-[15px]">
+              AI Interaction Analyzer
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/[0.035] px-3 py-2 text-[11px] font-medium text-slate-400 md:flex">
-            <LockKeyhole className="h-3.5 w-3.5 text-emerald-300" />
-            Transcript-grounded output
-          </div>
-          <div className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-gradient-to-br from-blue-500/15 via-violet-500/15 to-orange-400/15">
-            <Sparkles className="h-4 w-4 text-orange-200" strokeWidth={1.7} />
-          </div>
+        <div className="hidden items-center gap-2 md:flex">
+          <HeaderStatus icon={ShieldCheck}>Transcript grounded</HeaderStatus>
+          <HeaderStatus icon={FileCheck2}>ITSM ready</HeaderStatus>
         </div>
       </div>
     </motion.header>
+  );
+}
+
+function HeaderStatus({ icon: Icon, children }: { icon: ElementType; children: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-[#0b1018] px-3 py-2 text-[11px] font-medium text-slate-400">
+      <Icon className="h-3.5 w-3.5 text-blue-300" strokeWidth={1.8} />
+      {children}
+    </span>
   );
 }
