@@ -4,9 +4,9 @@ import "./globals.css";
 import { Providers } from "./providers";
 
 export const metadata: Metadata = {
-  title: "DXC AI Interaction Analyzer",
+  title: "DXC AI Analyzer",
   description:
-    "Convert customer support interactions into grounded Work Notes and concise Resolution Notes for ITSM workflows.",
+    "Convert complete support conversations into grounded Work Notes and concise Resolution Notes for ITSM workflows.",
 };
 
 export const viewport = {
