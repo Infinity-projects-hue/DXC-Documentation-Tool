@@ -1,8 +1,7 @@
 "use client";
 
-import type { ElementType, ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { BadgeCheck, ScanText, ShieldCheck, Sparkles } from "lucide-react";
+import { ScanText } from "lucide-react";
 import { InputCard } from "@/components/documentation/InputCard";
 import { OutputCards } from "@/components/documentation/OutputCards";
 
@@ -28,15 +27,9 @@ export default function HomeWorkspacePage() {
           <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.03] tracking-[-0.045em] text-slate-900 sm:text-5xl lg:text-[64px]">
             AI Interaction <span className="bg-[linear-gradient(135deg,#5c8ff3_0%,#f7944d_52%,#8e8fe2_100%)] bg-clip-text text-transparent">Analyzer</span>
           </h1>
-          <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
-            Convert customer interactions into clear work notes and resolution notes.
+          <p className="mt-5 max-w-3xl text-base leading-7 text-slate-600 sm:text-lg">
+            Paste the complete support conversation from the opening greeting through the closing statement. The analyzer ignores small talk, repeated dialogue, and closing messages, then extracts only the Issue, troubleshooting performed, technical Output, and Resolution Notes.
           </p>
-
-          <div className="mt-6 flex flex-wrap gap-2.5">
-            <FeaturePill icon={ShieldCheck}>Transcript-grounded</FeaturePill>
-            <FeaturePill icon={BadgeCheck}>ServiceNow ready</FeaturePill>
-            <FeaturePill icon={Sparkles}>DXC-inspired interface</FeaturePill>
-          </div>
         </motion.div>
 
         <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,0.94fr)_minmax(0,1.06fr)]">
@@ -45,15 +38,6 @@ export default function HomeWorkspacePage() {
         </div>
       </section>
     </div>
-  );
-}
-
-function FeaturePill({ icon: Icon, children }: { icon: ElementType; children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-[#ddd4cb] bg-white/72 px-3.5 py-2 text-xs text-slate-600 shadow-[0_12px_32px_-24px_rgba(25,38,67,0.28)] backdrop-blur-xl">
-      <Icon className="h-3.5 w-3.5 text-[#f08e56]" strokeWidth={1.8} />
-      {children}
-    </span>
   );
 }
 
