@@ -25,7 +25,7 @@ const responseSchema = {
         output: {
           type: "string",
           description:
-            "One Output entry stating only the final technical result or finding after troubleshooting in 1 to 3 concise sentences.",
+            "One Output entry stating only the final technical result or finding after troubleshooting in 1 to 3 professional sentences.",
         },
       },
       required: ["issue", "tsPerformed", "output"],
@@ -63,19 +63,19 @@ const systemInstruction = [
 const CONVERSATIONAL_FILLER =
   /\b(?:hello|good morning|good afternoon|good evening|how are you|thank you for contacting|is there anything else|have a good day|you'?re welcome)\b/i;
 
-type GeminiResult = {
+type OpenAIResult = {
   output: AnalyzerOutput;
   validation: string[];
 };
 
-class GeminiRequestError extends Error {
+class OpenAIRequestError extends Error {
   constructor(
     readonly model: string,
     readonly status: number,
     message: string,
   ) {
     super(message);
-    this.name = "GeminiRequestError";
+    this.name = "OpenAIRequestError";
   }
 }
 
@@ -188,68 +188,43 @@ function buildInteractionPrompt(transcript: string, repairIssues: string[]): str
     .join("\n");
 }
 
-function extractGeminiText(payload: unknown): string | null {
+function extractOpenAIText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
 
   const direct = (payload as { output_text?: unknown }).output_text;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
 
-  const steps = (payload as { steps?: unknown }).steps;
-  if (Array.isArray(steps)) {
-    for (const step of [...steps].reverse()) {
-      if (!step || typeof step !== "object") continue;
-      const content = (step as { content?: unknown }).content;
-      if (!Array.isArray(content)) continue;
+  const output = (payload as { output?: unknown }).output;
+  if (!Array.isArray(output)) return null;
 
-      const text = content
-        .map((item) => {
-          if (!item || typeof item !== "object") return "";
-          const type = (item as { type?: unknown }).type;
-          const value = (item as { text?: unknown }).text;
-          return type === "text" && typeof value === "string" ? value : "";
-        })
-        .join("")
-        .trim();
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
 
-      if (text) return text;
-    }
-  }
-
-  const candidates = (payload as { candidates?: unknown }).candidates;
-  if (Array.isArray(candidates)) {
-    for (const candidate of candidates) {
-      if (!candidate || typeof candidate !== "object") continue;
-      const content = (candidate as { content?: unknown }).content;
-      if (!content || typeof content !== "object") continue;
-      const parts = (content as { parts?: unknown }).parts;
-      if (!Array.isArray(parts)) continue;
-
-      const text = parts
-        .map((part) =>
-          part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
-            ? (part as { text: string }).text
-            : "",
-        )
-        .join("")
-        .trim();
-
-      if (text) return text;
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const type = (part as { type?: unknown }).type;
+      const text = (part as { text?: unknown }).text;
+      if (type === "output_text" && typeof text === "string" && text.trim()) {
+        return text.trim();
+      }
     }
   }
 
   return null;
 }
 
-function validateGeminiOutput(parsed: unknown): GeminiResult {
+function validateOpenAIOutput(parsed: unknown): OpenAIResult {
   if (!isStructurallyValid(parsed)) {
-    throw new Error("Gemini returned an invalid structured documentation response.");
+    throw new Error("OpenAI returned an invalid structured documentation response.");
   }
 
   const output = normalizeOutput(parsed);
   return { output, validation: validationIssues(output) };
 }
 
-async function generateWithGemini({
+async function generateWithOpenAI({
   apiKey,
   model,
   transcript,
@@ -259,83 +234,96 @@ async function generateWithGemini({
   model: string;
   transcript: string;
   repairIssues?: string[];
-}): Promise<GeminiResult> {
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+}): Promise<OpenAIResult> {
+  const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
     },
     signal: AbortSignal.timeout(55_000),
     body: JSON.stringify({
       model,
-      system_instruction: systemInstruction,
-      input: buildInteractionPrompt(transcript, repairIssues),
-      response_format: {
-        type: "text",
-        mime_type: "application/json",
-        schema: responseSchema,
+      store: false,
+      max_output_tokens: 2200,
+      instructions: systemInstruction,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: buildInteractionPrompt(transcript, repairIssues),
+            },
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "dxc_servicenow_work_notes",
+          description:
+            "DXC ServiceNow documentation containing the User's Issue, chronological Agent TS Performed, technical Output, and exactly two-sentence Resolution Notes.",
+          strict: true,
+          schema: responseSchema,
+        },
       },
     }),
   });
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new GeminiRequestError(
+    throw new OpenAIRequestError(
       model,
       response.status,
-      `Gemini request failed: ${detail.slice(0, 600)}`,
+      `OpenAI request failed: ${detail.slice(0, 600)}`,
     );
   }
 
   const payload = (await response.json()) as unknown;
-  const text = extractGeminiText(payload);
+  const text = extractOpenAIText(payload);
   const parsed = text ? parseStructuredOutput(text) : null;
-  return validateGeminiOutput(parsed);
+  return validateOpenAIOutput(parsed);
 }
 
 function uniqueValues(values: Array<string | undefined>): string[] {
   return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
 }
 
-function configuredApiKeys(): string[] {
-  return uniqueValues([process.env.GOOGLE_API_KEY, process.env.GEMINI_API_KEY]);
-}
-
 function configuredModels(): string[] {
   return uniqueValues([
-    process.env.GEMINI_MODEL,
-    "gemini-3.6-flash",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
+    process.env.OPENAI_MODEL,
+    "gpt-5-mini",
+    "gpt-4.1-mini",
+    "gpt-4o-mini",
   ]);
 }
 
-function explainGeminiFailure(error: unknown): string {
-  if (!(error instanceof GeminiRequestError)) {
-    return "Gemini returned an invalid or incomplete structured response.";
+function explainOpenAIFailure(error: unknown): string {
+  if (!(error instanceof OpenAIRequestError)) {
+    return "OpenAI returned an invalid or incomplete structured response.";
   }
 
   if (error.status === 400) {
-    return `Gemini rejected the request configuration for model ${error.model}.`;
+    return `OpenAI rejected the request configuration for model ${error.model}.`;
   }
   if (error.status === 401) {
-    return "Google rejected the API key. Verify that GOOGLE_API_KEY or GEMINI_API_KEY contains an active Gemini API key.";
+    return "OpenAI rejected the API key. Verify that OPENAI_API_KEY contains an active OpenAI API key.";
   }
   if (error.status === 403) {
-    return "Google denied Gemini API access. Check the Google AI project, API restrictions, and permissions for the key.";
+    return "OpenAI denied API access. Check the project permissions and model access for the key.";
   }
   if (error.status === 404) {
-    return `Gemini model ${error.model} is not available for this API key.`;
+    return `OpenAI model ${error.model} is not available for this API key.`;
   }
   if (error.status === 429) {
-    return "Gemini quota or rate limit was exceeded. Check the Google AI Studio quota and billing limits.";
+    return "OpenAI quota or rate limit was exceeded. Check API usage, billing, and rate limits.";
   }
   if (error.status >= 500) {
-    return "Gemini is temporarily unavailable. Please try again shortly.";
+    return "OpenAI is temporarily unavailable. Please try again shortly.";
   }
 
-  return `Gemini request failed with status ${error.status}.`;
+  return `OpenAI request failed with status ${error.status}.`;
 }
 
 export async function POST(request: Request) {
@@ -362,14 +350,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKeys = configuredApiKeys();
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
   const models = configuredModels();
 
-  if (apiKeys.length === 0) {
+  if (!apiKey) {
     return NextResponse.json(
       {
         error:
-          "Gemini is not configured. Add GOOGLE_API_KEY or GEMINI_API_KEY in Vercel and redeploy the project.",
+          "OpenAI is not configured. Add OPENAI_API_KEY in Vercel and redeploy the project.",
       },
       { status: 503 },
     );
@@ -377,41 +365,39 @@ export async function POST(request: Request) {
 
   const visibleFailures: string[] = [];
 
-  for (const apiKey of apiKeys) {
-    for (const model of models) {
-      try {
-        const firstAttempt = await generateWithGemini({ apiKey, model, transcript });
+  for (const model of models) {
+    try {
+      const firstAttempt = await generateWithOpenAI({ apiKey, model, transcript });
 
-        if (firstAttempt.validation.length === 0) {
-          return NextResponse.json({
-            output: firstAttempt.output,
-            mode: "gemini",
-            model,
-          });
-        }
-
-        const repairedAttempt = await generateWithGemini({
-          apiKey,
-          model,
-          transcript,
-          repairIssues: firstAttempt.validation,
-        });
-
-        if (repairedAttempt.validation.length > 0) {
-          throw new Error(
-            `Gemini response failed validation: ${repairedAttempt.validation.join("; ")}`,
-          );
-        }
-
+      if (firstAttempt.validation.length === 0) {
         return NextResponse.json({
-          output: repairedAttempt.output,
-          mode: "gemini",
+          output: firstAttempt.output,
+          mode: "openai",
           model,
         });
-      } catch (error) {
-        console.error(`Gemini/${model} interaction analysis failed.`, error);
-        visibleFailures.push(explainGeminiFailure(error));
       }
+
+      const repairedAttempt = await generateWithOpenAI({
+        apiKey,
+        model,
+        transcript,
+        repairIssues: firstAttempt.validation,
+      });
+
+      if (repairedAttempt.validation.length > 0) {
+        throw new Error(
+          `OpenAI response failed validation: ${repairedAttempt.validation.join("; ")}`,
+        );
+      }
+
+      return NextResponse.json({
+        output: repairedAttempt.output,
+        mode: "openai",
+        model,
+      });
+    } catch (error) {
+      console.error(`OpenAI/${model} interaction analysis failed.`, error);
+      visibleFailures.push(explainOpenAIFailure(error));
     }
   }
 
@@ -422,7 +408,7 @@ export async function POST(request: Request) {
       error:
         uniqueFailures.length > 0
           ? uniqueFailures.join(" ")
-          : "Gemini could not generate reliable work notes from this interaction.",
+          : "OpenAI could not generate reliable work notes from this interaction.",
     },
     { status: 502 },
   );
