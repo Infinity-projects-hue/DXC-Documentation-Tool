@@ -18,17 +18,15 @@ function normalize(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
-function splitQuotedLines(value: string): string[] {
+function cleanEntry(value: string): string {
   return value
-    .replace(/\r/g, "")
+    .replace(/\r/g, " ")
     .split(/\n+/)
-    .flatMap((line) => {
-      const cleaned = line.trim().replace(/^\s*[>•*\-\d.)]+\s*/, "");
-      if (!cleaned) return [];
-      return cleaned.match(/[^.!?]+(?:[.!?]+(?=\s|$)|$)/g) ?? [cleaned];
-    })
-    .map((item) => normalize(item))
-    .filter(Boolean);
+    .map((line) => line.trim().replace(/^\s*[>•*\-\d.)]+\s*/, ""))
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function workNotesText(output: DocumentationOutput): string {
@@ -36,13 +34,13 @@ function workNotesText(output: DocumentationOutput): string {
     "WORK NOTES",
     "",
     "Issue:",
-    ...splitQuotedLines(output.workNotes.issue).map((line) => `> ${line}`),
+    `> ${cleanEntry(output.workNotes.issue)}`,
     "",
     "TS Performed:",
     ...output.workNotes.tsPerformed.map((item) => `> ${normalize(item)}`),
     "",
     "Output:",
-    ...splitQuotedLines(output.workNotes.output).map((line) => `> ${line}`),
+    `> ${cleanEntry(output.workNotes.output)}`,
   ].join("\n");
 }
 
@@ -50,7 +48,7 @@ function resolutionText(output: DocumentationOutput): string {
   return [
     "RESOLUTION NOTES",
     "",
-    ...splitQuotedLines(output.resolutionNotes).map((line) => `> ${line}`),
+    `> ${cleanEntry(output.resolutionNotes)}`,
   ].join("\n");
 }
 
@@ -171,7 +169,7 @@ export function OutputCards() {
                 }
               >
                 <AlignedSection label="Issue">
-                  <QuoteLines lines={splitQuotedLines(output.workNotes.issue)} />
+                  <QuoteLines lines={[cleanEntry(output.workNotes.issue)]} />
                 </AlignedSection>
 
                 <AlignedSection label="TS Performed">
@@ -179,7 +177,7 @@ export function OutputCards() {
                 </AlignedSection>
 
                 <AlignedSection label="Output">
-                  <QuoteLines lines={splitQuotedLines(output.workNotes.output)} />
+                  <QuoteLines lines={[cleanEntry(output.workNotes.output)]} />
                 </AlignedSection>
               </NotesCard>
 
@@ -196,7 +194,7 @@ export function OutputCards() {
                 }
               >
                 <AlignedSection label="Resolution">
-                  <QuoteLines lines={splitQuotedLines(output.resolutionNotes)} />
+                  <QuoteLines lines={[cleanEntry(output.resolutionNotes)]} />
                 </AlignedSection>
               </NotesCard>
             </motion.div>
