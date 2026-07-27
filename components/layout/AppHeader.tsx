@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Moon, ShieldCheck, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
 import { DxcLogo } from "@/components/brand/DxcLogo";
 
@@ -43,33 +43,26 @@ export function AppHeader() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
-          <div className="hidden items-center gap-2 rounded-full border border-[#d9d3cf] bg-white/70 px-3.5 py-2 text-[11px] font-medium text-slate-600 dark:border-white/10 dark:bg-white/[0.055] dark:text-slate-300 md:flex">
-            <ShieldCheck className="h-3.5 w-3.5 text-[#f28c54]" />
-            Transcript-grounded output
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setTheme(isDark ? "light" : "dark")}
-            disabled={!mounted}
-            aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
-            title={isDark ? "Switch to light theme" : "Switch to dark theme"}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-white/80 bg-[linear-gradient(135deg,rgba(92,143,243,0.14),rgba(247,148,77,0.16),rgba(155,136,214,0.16))] text-slate-700 shadow-[0_10px_26px_-18px_rgba(92,143,243,0.6)] transition hover:scale-105 hover:border-[#d3ccc5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5c8ff3]/45 disabled:cursor-wait dark:border-white/12 dark:bg-[linear-gradient(135deg,rgba(92,143,243,0.22),rgba(247,148,77,0.18),rgba(155,136,214,0.2))] dark:text-white"
-          >
-            <AnimatePresence mode="wait" initial={false}>
-              <motion.span
-                key={isDark ? "sun" : "moon"}
-                initial={{ opacity: 0, rotate: -35, scale: 0.75 }}
-                animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                exit={{ opacity: 0, rotate: 35, scale: 0.75 }}
-                transition={{ duration: 0.18 }}
-              >
-                {isDark ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
-              </motion.span>
-            </AnimatePresence>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+          disabled={!mounted}
+          aria-label={isDark ? "Switch to light theme" : "Switch to dark theme"}
+          title={isDark ? "Switch to light theme" : "Switch to dark theme"}
+          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/80 bg-[linear-gradient(135deg,rgba(92,143,243,0.14),rgba(247,148,77,0.16),rgba(155,136,214,0.16))] text-slate-700 shadow-[0_10px_26px_-18px_rgba(92,143,243,0.6)] transition hover:scale-105 hover:border-[#d3ccc5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#5c8ff3]/45 disabled:cursor-wait dark:border-white/12 dark:bg-[linear-gradient(135deg,rgba(92,143,243,0.22),rgba(247,148,77,0.18),rgba(155,136,214,0.2))] dark:text-white"
+        >
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.span
+              key={isDark ? "sun" : "moon"}
+              initial={{ opacity: 0, rotate: -35, scale: 0.75 }}
+              animate={{ opacity: 1, rotate: 0, scale: 1 }}
+              exit={{ opacity: 0, rotate: 35, scale: 0.75 }}
+              transition={{ duration: 0.18 }}
+            >
+              {isDark ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+            </motion.span>
+          </AnimatePresence>
+        </button>
       </div>
     </motion.header>
   );
