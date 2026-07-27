@@ -39,102 +39,25 @@ const responseSchema = {
   required: ["workNotes", "resolutionNotes"],
 } as const;
 
-const geminiResponseSchema = {
-  type: "OBJECT",
-  properties: {
-    workNotes: {
-      type: "OBJECT",
-      properties: {
-        issue: {
-          type: "STRING",
-          description:
-            "One Issue entry describing the User's technical impact, affected service or device, and clearly supported cause in 1 to 3 professional sentences.",
-        },
-        tsPerformed: {
-          type: "ARRAY",
-          description:
-            "Chronological troubleshooting performed by the DXC Agent or explicitly instructed by the Agent, with one concise action per item.",
-          items: { type: "STRING" },
-        },
-        output: {
-          type: "STRING",
-          description:
-            "One Output entry stating only the final technical result or finding after troubleshooting in 1 to 3 concise sentences.",
-        },
-      },
-      required: ["issue", "tsPerformed", "output"],
-    },
-    resolutionNotes: {
-      type: "STRING",
-      description:
-        "Exactly two concise professional sentences: current Incident status, followed by the confirmed fix/validation or the outstanding dependency.",
-    },
-  },
-  required: ["workNotes", "resolutionNotes"],
-} as const;
-
 const systemInstruction = [
   "You are a Senior DXC IT Service Desk Analyst creating ServiceNow Work Notes from complete support interactions.",
   "The input is usually a long interactive conversation containing User messages, DXC Analyst messages, timestamps, names, automated system messages, greetings, clarifying questions, repeated explanations, hold messages, acknowledgements, and closing statements.",
   "Do not summarize the conversation. Analyze the dialogue and extract only the technical documentation required by the JSON schema.",
-
-  "SPEAKER AND ROLE ANALYSIS:",
-  "Identify the supported person as the User. Labels may include User, Customer, Caller, Client, Employee, Requester, End User, a person's name, or may be inferred from context.",
-  "Identify DXC support personnel as the Agent. Labels may include Agent, Analyst, DXC Analyst, Support, Service Desk, Technician, Engineer, or a person's name associated with support actions.",
-  "Use speaker labels, timestamps, message order, questions, answers, and technical context to determine who reported the issue, who provided troubleshooting, and who confirmed the result.",
+  "Identify the supported person as the User and DXC support personnel as the Agent by using speaker labels, message order, questions, answers, and technical context.",
   "A User statement is evidence of the issue, symptoms, business impact, actions completed, and final confirmation. An Agent statement is evidence of investigation, checks, troubleshooting performed, instructions provided, escalation, and status handling.",
   "Do not confuse a User's description of the problem with an Agent troubleshooting action.",
-  "Do not treat a User's casual reply, acknowledgement, or repeated symptom as troubleshooting.",
-
-  "IGNORE CONVERSATIONAL NOISE:",
-  "Silently ignore greetings, introductions, how-are-you exchanges, pleasantries, apologies, empathy statements, acknowledgements, hold notifications, typing indicators, queue messages, bot prompts, survey invitations, repeated restatements, thank-you messages, goodbye statements, and standard support closing scripts.",
-  "Never include hello, thank you for contacting support, is there anything else, have a good day, or similar filler in any output field.",
-  "Retain identity verification only when the Agent explicitly completed it and it is appropriate to document as an Agent action.",
-
-  "FACTUAL GROUNDING:",
-  "Use only facts supported by the supplied interaction. Never fabricate troubleshooting, commands, checks, escalations, root causes, technical findings, approvals, timelines, resolutions, User actions, or final confirmation.",
-  "When a cause is not confirmed, describe only the observed symptom or blocker.",
-  "When a successful result is not confirmed, do not mark the Incident resolved.",
-  "Remove duplicate actions while preserving the original chronological sequence.",
-
-  "ISSUE:",
-  "Write one Issue entry containing 1 to 3 professional sentences.",
-  "Start with the User's technical impact: what the User could not do, what failed, or what service/device/account was affected.",
-  "Include the affected application, service, device, or account and the business impact when stated.",
-  "Include a cause only when it was clearly established during the interaction.",
-  "Do not describe that the User contacted support and do not recap the conversation.",
-  "Do not add a bullet symbol because the interface adds the > prefix.",
-
-  "TS PERFORMED:",
-  "Document the troubleshooting provided by the DXC Agent in chronological order, with one action per array item.",
-  "Include actions the Agent directly performed, such as reviewing the issue, checking account status, examining configuration, running commands, resetting components, changing settings, testing functionality, reviewing logs, creating or referencing a Ticket, escalating a Case, or arranging a callback.",
-  "Include troubleshooting the Agent instructed the User to perform, phrased accurately as Guided the User to..., Advised the User to..., Instructed the User to..., or Requested the User to....",
-  "When the User confirms completing an Agent instruction, document the Agent's guidance and include the confirmation only when it materially explains the result.",
-  "Do not claim the Agent performed an action that the User performed. Do not claim the User performed an instructed step unless completion is confirmed in the conversation.",
-  "Do not include generic best-practice steps, inferred steps, future possibilities, greetings, empathy, repetitive questions, or closing statements.",
-  "Use concise professional past-tense wording. Do not add bullet symbols because the interface adds the > prefix.",
-
-  "OUTPUT:",
-  "Write one Output entry containing 1 to 3 concise professional sentences.",
-  "State what happened after the troubleshooting: successful access, restored functionality, persistent error, identified blocker, failed test, required credentials, missing license, escalation requirement, or another supported technical conclusion.",
-  "Output is the technical result, not the resolution status and not a list of future actions.",
-  "Do not merely repeat the Issue or the troubleshooting steps.",
-  "If the interaction ends without a confirmed technical result, state that no successful outcome was confirmed and identify the last supported finding.",
-  "Do not add a bullet symbol because the interface adds the > prefix.",
-
-  "RESOLUTION NOTES:",
-  "Write exactly two short professional sentences in one string.",
-  "Sentence 1 must state the current Incident status: Resolved, Pending User Action, Pending Manager Approval, Pending License Assignment, Pending Replacement, Pending Restart, Pending Validation, Pending Callback, Pending Synchronization, Escalated, Awaiting Specialist Team, Awaiting Hardware, Awaiting Remote Session, Awaiting Admin Credentials, On Hold, or Transferred.",
-  "Sentence 2 must briefly state the confirmed fix and User validation when resolved, or the precise outstanding dependency/next ownership when unresolved.",
-  "Keep both sentences specific to the interaction. Do not use vague wording such as documented troubleshooting actions were completed.",
-  "Do not repeat the full Output and do not add a bullet symbol because the interface adds the > prefix.",
-
-  "TERMINOLOGY AND OUTPUT CONTROL:",
+  "Silently ignore greetings, introductions, pleasantries, apologies, empathy statements, acknowledgements, hold notifications, typing indicators, queue messages, bot prompts, surveys, repeated restatements, thank-you messages, goodbye statements, and standard closing scripts.",
+  "Use only facts supported by the supplied interaction. Never fabricate troubleshooting, commands, checks, escalations, root causes, findings, approvals, timelines, resolutions, User actions, or final confirmation.",
+  "When a cause is not confirmed, describe only the observed symptom or blocker. When a successful result is not confirmed, do not mark the Incident resolved.",
+  "Write one Issue entry containing 1 to 3 professional sentences, beginning with the User's technical impact and identifying the affected application, service, device, or account.",
+  "Document the troubleshooting provided by the DXC Agent in chronological order with one action per item.",
+  "Include actions the Agent directly performed and troubleshooting the Agent instructed the User to perform. Phrase instructions accurately as Guided the User to..., Advised the User to..., Instructed the User to..., or Requested the User to....",
+  "Do not claim the Agent performed an action completed by the User, and do not claim an instructed User action was completed unless the conversation confirms completion.",
+  "Write one Output entry containing 1 to 3 concise professional sentences stating the actual technical result after troubleshooting.",
+  "Write exactly two short Resolution Notes sentences. Sentence 1 states the current Incident status. Sentence 2 states the confirmed fix and User validation when resolved, or the precise outstanding dependency and ownership when unresolved.",
   "Use User, Agent, Incident, Ticket, or Case where applicable. Do not use Customer, Caller, Client, I, We, You, He, She, or They in the generated documentation.",
-  "Correct grammar and product names while preserving technical meaning.",
-  "Return only workNotes.issue, workNotes.tsPerformed, workNotes.output, and resolutionNotes in the required JSON schema.",
-  "Do not return Summary, RCA, Next Action, recommendations, headings, markdown, bullet characters, or any other section.",
-  "Before returning, verify that the Issue belongs to the supported User, every TS item came from the Agent's actual action or instruction, Output reflects the real result, Resolution Notes contain exactly two sentences, and nothing was invented.",
+  "Return only workNotes.issue, workNotes.tsPerformed, workNotes.output, and resolutionNotes. Do not return headings, markdown, bullet characters, Summary, RCA, Next Action, recommendations, or any other section.",
+  "Before returning, verify that the Issue belongs to the supported User, every TS item came from the Agent's actual action or instruction, Output reflects the real result, Resolution Notes contain exactly two sentences, conversational filler is absent, and nothing was invented.",
 ].join(" ");
 
 const CONVERSATIONAL_FILLER =
@@ -145,13 +68,25 @@ type ProviderName = "openai" | "gemini";
 type ProviderConfig = {
   provider: ProviderName;
   apiKey: string;
-  model: string;
+  models: string[];
 };
 
 type ProviderResult = {
   output: AnalyzerOutput;
   validation: string[];
 };
+
+class ProviderRequestError extends Error {
+  constructor(
+    readonly provider: ProviderName,
+    readonly model: string,
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProviderRequestError";
+  }
+}
 
 function sentenceCount(value: string): number {
   return (value.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [])
@@ -184,18 +119,12 @@ function validationIssues(output: AnalyzerOutput): string[] {
   const outputCount = sentenceCount(output.workNotes.output);
   const resolutionCount = sentenceCount(output.resolutionNotes);
 
-  if (issueCount < 1 || issueCount > 3) {
-    issues.push("Issue must contain 1 to 3 sentences");
-  }
+  if (issueCount < 1 || issueCount > 3) issues.push("Issue must contain 1 to 3 sentences");
   if (output.workNotes.tsPerformed.length > 20) {
     issues.push("TS Performed must contain no more than 20 chronological actions");
   }
-  if (outputCount < 1 || outputCount > 3) {
-    issues.push("Output must contain 1 to 3 sentences");
-  }
-  if (resolutionCount !== 2) {
-    issues.push("Resolution Notes must contain exactly two sentences");
-  }
+  if (outputCount < 1 || outputCount > 3) issues.push("Output must contain 1 to 3 sentences");
+  if (resolutionCount !== 2) issues.push("Resolution Notes must contain exactly two sentences");
 
   const allText = [
     output.workNotes.issue,
@@ -333,6 +262,7 @@ function validateProviderOutput(parsed: unknown, provider: ProviderName): Provid
 
 async function generateWithOpenAI(
   config: ProviderConfig,
+  model: string,
   transcript: string,
   repairIssues: string[],
 ): Promise<ProviderResult> {
@@ -344,10 +274,9 @@ async function generateWithOpenAI(
     },
     signal: AbortSignal.timeout(55_000),
     body: JSON.stringify({
-      model: config.model,
+      model,
       store: false,
       max_output_tokens: 2200,
-      reasoning: { effort: "medium" },
       instructions: systemInstruction,
       input: [
         {
@@ -361,7 +290,6 @@ async function generateWithOpenAI(
         },
       ],
       text: {
-        verbosity: "low",
         format: {
           type: "json_schema",
           name: "dxc_servicenow_work_notes",
@@ -376,7 +304,12 @@ async function generateWithOpenAI(
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`OpenAI request failed with status ${response.status}: ${detail.slice(0, 400)}`);
+    throw new ProviderRequestError(
+      "openai",
+      model,
+      response.status,
+      `OpenAI request failed: ${detail.slice(0, 500)}`,
+    );
   }
 
   const payload = (await response.json()) as unknown;
@@ -387,12 +320,13 @@ async function generateWithOpenAI(
 
 async function generateWithGemini(
   config: ProviderConfig,
+  model: string,
   transcript: string,
   repairIssues: string[],
 ): Promise<ProviderResult> {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      config.model,
+      model,
     )}:generateContent`,
     {
       method: "POST",
@@ -414,8 +348,12 @@ async function generateWithGemini(
         generationConfig: {
           temperature: 0.1,
           maxOutputTokens: 2200,
-          responseMimeType: "application/json",
-          responseSchema: geminiResponseSchema,
+          responseFormat: {
+            text: {
+              mimeType: "application/json",
+              schema: responseSchema,
+            },
+          },
         },
       }),
     },
@@ -423,7 +361,12 @@ async function generateWithGemini(
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(`Gemini request failed with status ${response.status}: ${detail.slice(0, 400)}`);
+    throw new ProviderRequestError(
+      "gemini",
+      model,
+      response.status,
+      `Gemini request failed: ${detail.slice(0, 500)}`,
+    );
   }
 
   const payload = (await response.json()) as unknown;
@@ -434,18 +377,23 @@ async function generateWithGemini(
 
 async function generateWithProvider(
   config: ProviderConfig,
+  model: string,
   transcript: string,
   repairIssues: string[] = [],
 ): Promise<ProviderResult> {
   return config.provider === "openai"
-    ? generateWithOpenAI(config, transcript, repairIssues)
-    : generateWithGemini(config, transcript, repairIssues);
+    ? generateWithOpenAI(config, model, transcript, repairIssues)
+    : generateWithGemini(config, model, transcript, repairIssues);
 }
 
 function inferGenericProvider(apiKey: string): ProviderName | null {
   if (/^sk-/i.test(apiKey)) return "openai";
   if (/^AIza/i.test(apiKey)) return "gemini";
   return null;
+}
+
+function uniqueModels(values: Array<string | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
 }
 
 function configuredProviders(): ProviderConfig[] {
@@ -471,7 +419,12 @@ function configuredProviders(): ProviderConfig[] {
     providers.push({
       provider: "openai",
       apiKey: openAIKey,
-      model: process.env.OPENAI_MODEL?.trim() || "gpt-5.1",
+      models: uniqueModels([
+        process.env.OPENAI_MODEL,
+        "gpt-5-mini",
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+      ]),
     });
   }
 
@@ -479,7 +432,11 @@ function configuredProviders(): ProviderConfig[] {
     providers.push({
       provider: "gemini",
       apiKey: geminiKey,
-      model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+      models: uniqueModels([
+        process.env.GEMINI_MODEL,
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+      ]),
     });
   }
 
@@ -488,12 +445,12 @@ function configuredProviders(): ProviderConfig[] {
       {
         provider: "openai",
         apiKey: genericKey,
-        model: process.env.OPENAI_MODEL?.trim() || "gpt-5.1",
+        models: uniqueModels(["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini"]),
       },
       {
         provider: "gemini",
         apiKey: genericKey,
-        model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+        models: uniqueModels(["gemini-2.5-flash", "gemini-2.5-flash-lite"]),
       },
     );
   }
@@ -516,6 +473,27 @@ function configuredProviders(): ProviderConfig[] {
           candidate.provider === provider.provider && candidate.apiKey === provider.apiKey,
       ) === index,
   );
+}
+
+function explainProviderFailure(error: unknown): string {
+  if (!(error instanceof ProviderRequestError)) {
+    return "The provider returned an invalid or incomplete structured response.";
+  }
+
+  const label = error.provider === "openai" ? "OpenAI" : "Gemini";
+
+  if (error.status === 401) return `${label} rejected the API key. Verify that the key is valid and active.`;
+  if (error.status === 403) return `${label} denied access. Verify project permissions and model access.`;
+  if (error.status === 404) return `${label} could not find the configured model.`;
+  if (error.status === 429) {
+    return `${label} quota or rate limit was exceeded. Check provider quota, billing, and rate limits.`;
+  }
+  if (error.status === 400) {
+    return `${label} rejected the request configuration for model ${error.model}.`;
+  }
+  if (error.status >= 500) return `${label} is temporarily unavailable.`;
+
+  return `${label} request failed with status ${error.status}.`;
 }
 
 export async function POST(request: Request) {
@@ -554,52 +532,56 @@ export async function POST(request: Request) {
     );
   }
 
-  const failures: string[] = [];
+  const visibleFailures: string[] = [];
 
   for (const provider of providers) {
-    try {
-      const firstAttempt = await generateWithProvider(provider, transcript);
+    for (const model of provider.models) {
+      try {
+        const firstAttempt = await generateWithProvider(provider, model, transcript);
 
-      if (firstAttempt.validation.length === 0) {
-        return NextResponse.json({
-          output: firstAttempt.output,
-          mode: provider.provider,
-          model: provider.model,
-        });
-      }
+        if (firstAttempt.validation.length === 0) {
+          return NextResponse.json({
+            output: firstAttempt.output,
+            mode: provider.provider,
+            model,
+          });
+        }
 
-      const repairedAttempt = await generateWithProvider(
-        provider,
-        transcript,
-        firstAttempt.validation,
-      );
-
-      if (repairedAttempt.validation.length > 0) {
-        throw new Error(
-          `${provider.provider} response failed validation: ${repairedAttempt.validation.join(
-            "; ",
-          )}`,
+        const repairedAttempt = await generateWithProvider(
+          provider,
+          model,
+          transcript,
+          firstAttempt.validation,
         );
-      }
 
-      return NextResponse.json({
-        output: repairedAttempt.output,
-        mode: provider.provider,
-        model: provider.model,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown provider error";
-      failures.push(`${provider.provider}: ${message}`);
-      console.error(`${provider.provider} interaction analysis failed.`, error);
+        if (repairedAttempt.validation.length > 0) {
+          throw new Error(
+            `${provider.provider} response failed validation: ${repairedAttempt.validation.join(
+              "; ",
+            )}`,
+          );
+        }
+
+        return NextResponse.json({
+          output: repairedAttempt.output,
+          mode: provider.provider,
+          model,
+        });
+      } catch (error) {
+        console.error(`${provider.provider}/${model} interaction analysis failed.`, error);
+        visibleFailures.push(explainProviderFailure(error));
+      }
     }
   }
+
+  const uniqueFailures = Array.from(new Set(visibleFailures));
 
   return NextResponse.json(
     {
       error:
-        "The configured AI providers could not generate reliable work notes. Verify the API key, model access, quota, and billing, then try again.",
-      providersTried: providers.map((provider) => provider.provider),
-      details: process.env.NODE_ENV === "development" ? failures : undefined,
+        uniqueFailures.length > 0
+          ? uniqueFailures.join(" ")
+          : "The configured AI providers could not generate reliable work notes.",
     },
     { status: 502 },
   );
