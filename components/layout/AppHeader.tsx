@@ -23,24 +23,13 @@ export function AppHeader() {
     >
       <div className="mx-auto flex h-[76px] w-full max-w-[1680px] items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <div className="flex min-w-0 items-center gap-4">
-          <motion.div
-            whileHover={{ y: -1, scale: 1.01 }}
-            transition={{ duration: 0.22 }}
-            className="relative flex h-12 items-center rounded-2xl border border-white/70 bg-white/78 px-4 shadow-[0_14px_34px_-24px_rgba(25,38,67,0.25)] dark:border-white/12 dark:bg-white/[0.07]"
-          >
-            <DxcLogo className="h-8 w-auto" />
-          </motion.div>
+          <DxcLogo className="h-9 w-auto shrink-0 object-contain sm:h-10" />
 
           <div className="hidden h-8 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent dark:via-white/15 sm:block" />
 
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold tracking-tight text-slate-900 dark:text-white sm:text-[15px]">
-              AI Interaction Analyzer
-            </p>
-            <p className="hidden truncate text-[11px] text-slate-500 dark:text-slate-400 sm:block">
-              Premium support documentation workspace
-            </p>
-          </div>
+          <p className="truncate text-sm font-semibold tracking-tight text-slate-900 dark:text-white sm:text-[15px]">
+            AI Analyzer
+          </p>
         </div>
 
         <button
@@ -59,7 +48,7 @@ export function AppHeader() {
               exit={{ opacity: 0, rotate: 35, scale: 0.75 }}
               transition={{ duration: 0.18 }}
             >
-              {isDark ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+              {isDark ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
             </motion.span>
           </AnimatePresence>
         </button>
