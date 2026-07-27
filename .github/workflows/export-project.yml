@@ -1,0 +1,32 @@
+name: Export project folder
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Prepare clean project folder
+        run: |
+          mkdir -p artifact/DXC-Documentation-Tool
+          rsync -a ./ artifact/DXC-Documentation-Tool/ \
+            --exclude '.git/' \
+            --exclude 'artifact/' \
+            --exclude '.github/workflows/export-project.yml'
+
+      - name: Upload project folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: DXC-Documentation-Tool
+          path: artifact/DXC-Documentation-Tool
+          include-hidden-files: true
+          if-no-files-found: error
