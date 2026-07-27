@@ -39,6 +39,40 @@ const responseSchema = {
   required: ["workNotes", "resolutionNotes"],
 } as const;
 
+const geminiResponseSchema = {
+  type: "OBJECT",
+  properties: {
+    workNotes: {
+      type: "OBJECT",
+      properties: {
+        issue: {
+          type: "STRING",
+          description:
+            "One Issue entry describing the User's technical impact, affected service or device, and clearly supported cause in 1 to 3 professional sentences.",
+        },
+        tsPerformed: {
+          type: "ARRAY",
+          description:
+            "Chronological troubleshooting performed by the DXC Agent or explicitly instructed by the Agent, with one concise action per item.",
+          items: { type: "STRING" },
+        },
+        output: {
+          type: "STRING",
+          description:
+            "One Output entry stating only the final technical result or finding after troubleshooting in 1 to 3 concise sentences.",
+        },
+      },
+      required: ["issue", "tsPerformed", "output"],
+    },
+    resolutionNotes: {
+      type: "STRING",
+      description:
+        "Exactly two concise professional sentences: current Incident status, followed by the confirmed fix/validation or the outstanding dependency.",
+    },
+  },
+  required: ["workNotes", "resolutionNotes"],
+} as const;
+
 const systemInstruction = [
   "You are a Senior DXC IT Service Desk Analyst creating ServiceNow Work Notes from complete support interactions.",
   "The input is usually a long interactive conversation containing User messages, DXC Analyst messages, timestamps, names, automated system messages, greetings, clarifying questions, repeated explanations, hold messages, acknowledgements, and closing statements.",
@@ -106,6 +140,19 @@ const systemInstruction = [
 const CONVERSATIONAL_FILLER =
   /\b(?:hello|good morning|good afternoon|good evening|how are you|thank you for contacting|is there anything else|have a good day|you'?re welcome)\b/i;
 
+type ProviderName = "openai" | "gemini";
+
+type ProviderConfig = {
+  provider: ProviderName;
+  apiKey: string;
+  model: string;
+};
+
+type ProviderResult = {
+  output: AnalyzerOutput;
+  validation: string[];
+};
+
 function sentenceCount(value: string): number {
   return (value.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [])
     .map((sentence) => sentence.trim())
@@ -164,33 +211,6 @@ function validationIssues(output: AnalyzerOutput): string[] {
   return issues;
 }
 
-function extractOutputText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-
-  const direct = (payload as { output_text?: unknown }).output_text;
-  if (typeof direct === "string" && direct.trim()) return direct.trim();
-
-  const output = (payload as { output?: unknown }).output;
-  if (!Array.isArray(output)) return null;
-
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const content = (item as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
-
-    for (const part of content) {
-      if (!part || typeof part !== "object") continue;
-      const type = (part as { type?: unknown }).type;
-      const text = (part as { text?: unknown }).text;
-      if (type === "output_text" && typeof text === "string" && text.trim()) {
-        return text.trim();
-      }
-    }
-  }
-
-  return null;
-}
-
 function parseStructuredOutput(text: string): unknown {
   const cleaned = text
     .trim()
@@ -226,37 +246,105 @@ function normalizeOutput(output: AnalyzerOutput): AnalyzerOutput {
   };
 }
 
-type OpenAIResult = {
-  output: AnalyzerOutput;
-  validation: string[];
-};
-
-async function generateWithOpenAI({
-  apiKey,
-  model,
-  transcript,
-  repairIssues = [],
-}: {
-  apiKey: string;
-  model: string;
-  transcript: string;
-  repairIssues?: string[];
-}): Promise<OpenAIResult> {
+function buildInteractionPrompt(transcript: string, repairIssues: string[]): string {
   const repairInstruction = repairIssues.length
-    ? `\n\nThe previous generation failed these checks: ${repairIssues.join(
+    ? `The previous generation failed these checks: ${repairIssues.join(
         "; ",
       )}. Regenerate the documentation and correct every listed problem.`
     : "";
 
+  return [
+    "Analyze the complete raw DXC support interaction below.",
+    "Determine the User and Agent roles from labels and context.",
+    "Extract the User's technical issue, the DXC Agent's actual troubleshooting/actions/instructions in chronological order, the real technical outcome, and exactly two concise Resolution Notes sentences.",
+    "Ignore all non-technical conversation.",
+    repairInstruction,
+    "",
+    "<support_interaction>",
+    transcript,
+    "</support_interaction>",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function extractOpenAIText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+
+  const direct = (payload as { output_text?: unknown }).output_text;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
+
+  const output = (payload as { output?: unknown }).output;
+  if (!Array.isArray(output)) return null;
+
+  for (const item of output) {
+    if (!item || typeof item !== "object") continue;
+    const content = (item as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const type = (part as { type?: unknown }).type;
+      const text = (part as { text?: unknown }).text;
+      if (type === "output_text" && typeof text === "string" && text.trim()) {
+        return text.trim();
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractGeminiText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidates = (payload as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) return null;
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const content = (candidate as { content?: unknown }).content;
+    if (!content || typeof content !== "object") continue;
+    const parts = (content as { parts?: unknown }).parts;
+    if (!Array.isArray(parts)) continue;
+
+    const text = parts
+      .map((part) =>
+        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+          ? (part as { text: string }).text
+          : "",
+      )
+      .join("")
+      .trim();
+
+    if (text) return text;
+  }
+
+  return null;
+}
+
+function validateProviderOutput(parsed: unknown, provider: ProviderName): ProviderResult {
+  if (!isStructurallyValid(parsed)) {
+    throw new Error(`${provider} returned an invalid structured documentation response.`);
+  }
+
+  const output = normalizeOutput(parsed);
+  return { output, validation: validationIssues(output) };
+}
+
+async function generateWithOpenAI(
+  config: ProviderConfig,
+  transcript: string,
+  repairIssues: string[],
+): Promise<ProviderResult> {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     signal: AbortSignal.timeout(55_000),
     body: JSON.stringify({
-      model,
+      model: config.model,
       store: false,
       max_output_tokens: 2200,
       reasoning: { effort: "medium" },
@@ -267,17 +355,7 @@ async function generateWithOpenAI({
           content: [
             {
               type: "input_text",
-              text: [
-                "Analyze the complete raw DXC support interaction below.",
-                "Determine the User and Agent roles from labels and context.",
-                "Extract the User's technical issue, the DXC Agent's actual troubleshooting/actions/instructions in chronological order, the real technical outcome, and exactly two concise Resolution Notes sentences.",
-                "Ignore all non-technical conversation.",
-                repairInstruction,
-                "",
-                "<support_interaction>",
-                transcript,
-                "</support_interaction>",
-              ].join("\n"),
+              text: buildInteractionPrompt(transcript, repairIssues),
             },
           ],
         },
@@ -302,15 +380,142 @@ async function generateWithOpenAI({
   }
 
   const payload = (await response.json()) as unknown;
-  const outputText = extractOutputText(payload);
-  const parsed = outputText ? parseStructuredOutput(outputText) : null;
+  const text = extractOpenAIText(payload);
+  const parsed = text ? parseStructuredOutput(text) : null;
+  return validateProviderOutput(parsed, "openai");
+}
 
-  if (!isStructurallyValid(parsed)) {
-    throw new Error("OpenAI returned an invalid structured documentation response.");
+async function generateWithGemini(
+  config: ProviderConfig,
+  transcript: string,
+  repairIssues: string[],
+): Promise<ProviderResult> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      config.model,
+    )}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": config.apiKey,
+      },
+      signal: AbortSignal.timeout(55_000),
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: buildInteractionPrompt(transcript, repairIssues) }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 2200,
+          responseMimeType: "application/json",
+          responseSchema: geminiResponseSchema,
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`Gemini request failed with status ${response.status}: ${detail.slice(0, 400)}`);
   }
 
-  const output = normalizeOutput(parsed);
-  return { output, validation: validationIssues(output) };
+  const payload = (await response.json()) as unknown;
+  const text = extractGeminiText(payload);
+  const parsed = text ? parseStructuredOutput(text) : null;
+  return validateProviderOutput(parsed, "gemini");
+}
+
+async function generateWithProvider(
+  config: ProviderConfig,
+  transcript: string,
+  repairIssues: string[] = [],
+): Promise<ProviderResult> {
+  return config.provider === "openai"
+    ? generateWithOpenAI(config, transcript, repairIssues)
+    : generateWithGemini(config, transcript, repairIssues);
+}
+
+function inferGenericProvider(apiKey: string): ProviderName | null {
+  if (/^sk-/i.test(apiKey)) return "openai";
+  if (/^AIza/i.test(apiKey)) return "gemini";
+  return null;
+}
+
+function configuredProviders(): ProviderConfig[] {
+  const preferred = process.env.AI_PROVIDER?.trim().toLowerCase();
+  const genericKey = process.env.AI_API_KEY?.trim();
+  const inferred = genericKey ? inferGenericProvider(genericKey) : null;
+
+  const openAIKey =
+    process.env.OPENAI_API_KEY?.trim() ||
+    (genericKey && (preferred === "openai" || (!preferred && inferred === "openai"))
+      ? genericKey
+      : undefined);
+  const geminiKey =
+    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.GOOGLE_API_KEY?.trim() ||
+    (genericKey && (preferred === "gemini" || (!preferred && inferred === "gemini"))
+      ? genericKey
+      : undefined);
+
+  const providers: ProviderConfig[] = [];
+
+  if (openAIKey) {
+    providers.push({
+      provider: "openai",
+      apiKey: openAIKey,
+      model: process.env.OPENAI_MODEL?.trim() || "gpt-5.1",
+    });
+  }
+
+  if (geminiKey) {
+    providers.push({
+      provider: "gemini",
+      apiKey: geminiKey,
+      model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+    });
+  }
+
+  if (genericKey && !preferred && !inferred && providers.length === 0) {
+    providers.push(
+      {
+        provider: "openai",
+        apiKey: genericKey,
+        model: process.env.OPENAI_MODEL?.trim() || "gpt-5.1",
+      },
+      {
+        provider: "gemini",
+        apiKey: genericKey,
+        model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+      },
+    );
+  }
+
+  const preference: ProviderName | null =
+    preferred === "gemini" || preferred === "openai" ? preferred : null;
+
+  if (preference) {
+    providers.sort((a, b) => {
+      if (a.provider === preference && b.provider !== preference) return -1;
+      if (a.provider !== preference && b.provider === preference) return 1;
+      return 0;
+    });
+  }
+
+  return providers.filter(
+    (provider, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate.provider === provider.provider && candidate.apiKey === provider.apiKey,
+      ) === index,
+  );
 }
 
 export async function POST(request: Request) {
@@ -337,46 +542,65 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
+  const providers = configuredProviders();
+
+  if (providers.length === 0) {
     return NextResponse.json(
       {
         error:
-          "OpenAI analysis is not configured. Add OPENAI_API_KEY in Vercel and redeploy the project.",
+          "AI analysis is not configured. Add OPENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY in Vercel. You may also use AI_API_KEY with AI_PROVIDER set to openai or gemini.",
       },
       { status: 503 },
     );
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-5.1";
+  const failures: string[] = [];
 
-  try {
-    const firstAttempt = await generateWithOpenAI({ apiKey, model, transcript });
+  for (const provider of providers) {
+    try {
+      const firstAttempt = await generateWithProvider(provider, transcript);
 
-    if (firstAttempt.validation.length === 0) {
-      return NextResponse.json({ output: firstAttempt.output, mode: "openai" });
+      if (firstAttempt.validation.length === 0) {
+        return NextResponse.json({
+          output: firstAttempt.output,
+          mode: provider.provider,
+          model: provider.model,
+        });
+      }
+
+      const repairedAttempt = await generateWithProvider(
+        provider,
+        transcript,
+        firstAttempt.validation,
+      );
+
+      if (repairedAttempt.validation.length > 0) {
+        throw new Error(
+          `${provider.provider} response failed validation: ${repairedAttempt.validation.join(
+            "; ",
+          )}`,
+        );
+      }
+
+      return NextResponse.json({
+        output: repairedAttempt.output,
+        mode: provider.provider,
+        model: provider.model,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown provider error";
+      failures.push(`${provider.provider}: ${message}`);
+      console.error(`${provider.provider} interaction analysis failed.`, error);
     }
-
-    const repairedAttempt = await generateWithOpenAI({
-      apiKey,
-      model,
-      transcript,
-      repairIssues: firstAttempt.validation,
-    });
-
-    if (repairedAttempt.validation.length > 0) {
-      throw new Error(`OpenAI response failed validation: ${repairedAttempt.validation.join("; ")}`);
-    }
-
-    return NextResponse.json({ output: repairedAttempt.output, mode: "openai" });
-  } catch (error) {
-    console.error("OpenAI interaction analysis failed.", error);
-    return NextResponse.json(
-      {
-        error:
-          "The AI could not generate reliable work notes from this interaction. Verify the OpenAI key, model access, and API quota, then try again.",
-      },
-      { status: 502 },
-    );
   }
+
+  return NextResponse.json(
+    {
+      error:
+        "The configured AI providers could not generate reliable work notes. Verify the API key, model access, quota, and billing, then try again.",
+      providersTried: providers.map((provider) => provider.provider),
+      details: process.env.NODE_ENV === "development" ? failures : undefined,
+    },
+    { status: 502 },
+  );
 }
