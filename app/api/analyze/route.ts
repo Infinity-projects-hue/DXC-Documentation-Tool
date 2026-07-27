@@ -33,7 +33,7 @@ const responseSchema = {
     resolutionNotes: {
       type: "string",
       description:
-        "Exactly two concise professional sentences: current Incident status, followed by the confirmed fix/validation or the outstanding dependency.",
+        "Exactly two concise professional sentences: current Incident status, followed by the confirmed fix and validation or the outstanding dependency.",
     },
   },
   required: ["workNotes", "resolutionNotes"],
@@ -41,8 +41,8 @@ const responseSchema = {
 
 const systemInstruction = [
   "You are a Senior DXC IT Service Desk Analyst creating ServiceNow Work Notes from complete support interactions.",
-  "The input is usually a long interactive conversation containing User messages, DXC Analyst messages, timestamps, names, automated system messages, greetings, clarifying questions, repeated explanations, hold messages, acknowledgements, and closing statements.",
-  "Do not summarize the conversation. Analyze the dialogue and extract only the technical documentation required by the JSON schema.",
+  "The input can be a long interactive conversation containing User messages, DXC Analyst messages, timestamps, names, automated system messages, greetings, clarifying questions, repeated explanations, hold messages, acknowledgements, and closing statements.",
+  "Do not summarize or retell the conversation. Analyze the dialogue and extract only the technical documentation required by the JSON schema.",
   "Identify the supported person as the User and DXC support personnel as the Agent by using speaker labels, message order, questions, answers, and technical context.",
   "A User statement is evidence of the issue, symptoms, business impact, actions completed, and final confirmation. An Agent statement is evidence of investigation, checks, troubleshooting performed, instructions provided, escalation, and status handling.",
   "Do not confuse a User's description of the problem with an Agent troubleshooting action.",
@@ -63,28 +63,19 @@ const systemInstruction = [
 const CONVERSATIONAL_FILLER =
   /\b(?:hello|good morning|good afternoon|good evening|how are you|thank you for contacting|is there anything else|have a good day|you'?re welcome)\b/i;
 
-type ProviderName = "openai" | "gemini";
-
-type ProviderConfig = {
-  provider: ProviderName;
-  apiKey: string;
-  models: string[];
-};
-
-type ProviderResult = {
+type GeminiResult = {
   output: AnalyzerOutput;
   validation: string[];
 };
 
-class ProviderRequestError extends Error {
+class GeminiRequestError extends Error {
   constructor(
-    readonly provider: ProviderName,
     readonly model: string,
     readonly status: number,
     message: string,
   ) {
     super(message);
-    this.name = "ProviderRequestError";
+    this.name = "GeminiRequestError";
   }
 }
 
@@ -185,7 +176,7 @@ function buildInteractionPrompt(transcript: string, repairIssues: string[]): str
   return [
     "Analyze the complete raw DXC support interaction below.",
     "Determine the User and Agent roles from labels and context.",
-    "Extract the User's technical issue, the DXC Agent's actual troubleshooting/actions/instructions in chronological order, the real technical outcome, and exactly two concise Resolution Notes sentences.",
+    "Extract the User's technical issue, the DXC Agent's actual troubleshooting, actions, and instructions in chronological order, the real technical outcome, and exactly two concise Resolution Notes sentences.",
     "Ignore all non-technical conversation.",
     repairInstruction,
     "",
@@ -197,303 +188,154 @@ function buildInteractionPrompt(transcript: string, repairIssues: string[]): str
     .join("\n");
 }
 
-function extractOpenAIText(payload: unknown): string | null {
+function extractGeminiText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
 
   const direct = (payload as { output_text?: unknown }).output_text;
   if (typeof direct === "string" && direct.trim()) return direct.trim();
 
-  const output = (payload as { output?: unknown }).output;
-  if (!Array.isArray(output)) return null;
+  const steps = (payload as { steps?: unknown }).steps;
+  if (Array.isArray(steps)) {
+    for (const step of [...steps].reverse()) {
+      if (!step || typeof step !== "object") continue;
+      const content = (step as { content?: unknown }).content;
+      if (!Array.isArray(content)) continue;
 
-  for (const item of output) {
-    if (!item || typeof item !== "object") continue;
-    const content = (item as { content?: unknown }).content;
-    if (!Array.isArray(content)) continue;
+      const text = content
+        .map((item) => {
+          if (!item || typeof item !== "object") return "";
+          const type = (item as { type?: unknown }).type;
+          const value = (item as { text?: unknown }).text;
+          return type === "text" && typeof value === "string" ? value : "";
+        })
+        .join("")
+        .trim();
 
-    for (const part of content) {
-      if (!part || typeof part !== "object") continue;
-      const type = (part as { type?: unknown }).type;
-      const text = (part as { text?: unknown }).text;
-      if (type === "output_text" && typeof text === "string" && text.trim()) {
-        return text.trim();
-      }
+      if (text) return text;
+    }
+  }
+
+  const candidates = (payload as { candidates?: unknown }).candidates;
+  if (Array.isArray(candidates)) {
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== "object") continue;
+      const content = (candidate as { content?: unknown }).content;
+      if (!content || typeof content !== "object") continue;
+      const parts = (content as { parts?: unknown }).parts;
+      if (!Array.isArray(parts)) continue;
+
+      const text = parts
+        .map((part) =>
+          part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+            ? (part as { text: string }).text
+            : "",
+        )
+        .join("")
+        .trim();
+
+      if (text) return text;
     }
   }
 
   return null;
 }
 
-function extractGeminiText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const candidates = (payload as { candidates?: unknown }).candidates;
-  if (!Array.isArray(candidates)) return null;
-
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== "object") continue;
-    const content = (candidate as { content?: unknown }).content;
-    if (!content || typeof content !== "object") continue;
-    const parts = (content as { parts?: unknown }).parts;
-    if (!Array.isArray(parts)) continue;
-
-    const text = parts
-      .map((part) =>
-        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
-          ? (part as { text: string }).text
-          : "",
-      )
-      .join("")
-      .trim();
-
-    if (text) return text;
-  }
-
-  return null;
-}
-
-function validateProviderOutput(parsed: unknown, provider: ProviderName): ProviderResult {
+function validateGeminiOutput(parsed: unknown): GeminiResult {
   if (!isStructurallyValid(parsed)) {
-    throw new Error(`${provider} returned an invalid structured documentation response.`);
+    throw new Error("Gemini returned an invalid structured documentation response.");
   }
 
   const output = normalizeOutput(parsed);
   return { output, validation: validationIssues(output) };
 }
 
-async function generateWithOpenAI(
-  config: ProviderConfig,
-  model: string,
-  transcript: string,
-  repairIssues: string[],
-): Promise<ProviderResult> {
-  const response = await fetch("https://api.openai.com/v1/responses", {
+async function generateWithGemini({
+  apiKey,
+  model,
+  transcript,
+  repairIssues = [],
+}: {
+  apiKey: string;
+  model: string;
+  transcript: string;
+  repairIssues?: string[];
+}): Promise<GeminiResult> {
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
     },
     signal: AbortSignal.timeout(55_000),
     body: JSON.stringify({
       model,
-      store: false,
-      max_output_tokens: 2200,
-      instructions: systemInstruction,
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: buildInteractionPrompt(transcript, repairIssues),
-            },
-          ],
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "dxc_servicenow_work_notes",
-          description:
-            "DXC ServiceNow documentation containing the User's Issue, chronological Agent TS Performed, technical Output, and exactly two-sentence Resolution Notes.",
-          strict: true,
-          schema: responseSchema,
-        },
+      system_instruction: systemInstruction,
+      input: buildInteractionPrompt(transcript, repairIssues),
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: responseSchema,
       },
     }),
   });
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new ProviderRequestError(
-      "openai",
+    throw new GeminiRequestError(
       model,
       response.status,
-      `OpenAI request failed: ${detail.slice(0, 500)}`,
-    );
-  }
-
-  const payload = (await response.json()) as unknown;
-  const text = extractOpenAIText(payload);
-  const parsed = text ? parseStructuredOutput(text) : null;
-  return validateProviderOutput(parsed, "openai");
-}
-
-async function generateWithGemini(
-  config: ProviderConfig,
-  model: string,
-  transcript: string,
-  repairIssues: string[],
-): Promise<ProviderResult> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model,
-    )}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": config.apiKey,
-      },
-      signal: AbortSignal.timeout(55_000),
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: systemInstruction }],
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: buildInteractionPrompt(transcript, repairIssues) }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 2200,
-          responseFormat: {
-            text: {
-              mimeType: "application/json",
-              schema: responseSchema,
-            },
-          },
-        },
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new ProviderRequestError(
-      "gemini",
-      model,
-      response.status,
-      `Gemini request failed: ${detail.slice(0, 500)}`,
+      `Gemini request failed: ${detail.slice(0, 600)}`,
     );
   }
 
   const payload = (await response.json()) as unknown;
   const text = extractGeminiText(payload);
   const parsed = text ? parseStructuredOutput(text) : null;
-  return validateProviderOutput(parsed, "gemini");
+  return validateGeminiOutput(parsed);
 }
 
-async function generateWithProvider(
-  config: ProviderConfig,
-  model: string,
-  transcript: string,
-  repairIssues: string[] = [],
-): Promise<ProviderResult> {
-  return config.provider === "openai"
-    ? generateWithOpenAI(config, model, transcript, repairIssues)
-    : generateWithGemini(config, model, transcript, repairIssues);
-}
-
-function inferGenericProvider(apiKey: string): ProviderName | null {
-  if (/^sk-/i.test(apiKey)) return "openai";
-  if (/^AIza/i.test(apiKey)) return "gemini";
-  return null;
-}
-
-function uniqueModels(values: Array<string | undefined>): string[] {
+function uniqueValues(values: Array<string | undefined>): string[] {
   return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
 }
 
-function configuredProviders(): ProviderConfig[] {
-  const preferred = process.env.AI_PROVIDER?.trim().toLowerCase();
-  const genericKey = process.env.AI_API_KEY?.trim();
-  const inferred = genericKey ? inferGenericProvider(genericKey) : null;
-
-  const openAIKey =
-    process.env.OPENAI_API_KEY?.trim() ||
-    (genericKey && (preferred === "openai" || (!preferred && inferred === "openai"))
-      ? genericKey
-      : undefined);
-  const geminiKey =
-    process.env.GEMINI_API_KEY?.trim() ||
-    process.env.GOOGLE_API_KEY?.trim() ||
-    (genericKey && (preferred === "gemini" || (!preferred && inferred === "gemini"))
-      ? genericKey
-      : undefined);
-
-  const providers: ProviderConfig[] = [];
-
-  if (openAIKey) {
-    providers.push({
-      provider: "openai",
-      apiKey: openAIKey,
-      models: uniqueModels([
-        process.env.OPENAI_MODEL,
-        "gpt-5-mini",
-        "gpt-4.1-mini",
-        "gpt-4o-mini",
-      ]),
-    });
-  }
-
-  if (geminiKey) {
-    providers.push({
-      provider: "gemini",
-      apiKey: geminiKey,
-      models: uniqueModels([
-        process.env.GEMINI_MODEL,
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-      ]),
-    });
-  }
-
-  if (genericKey && !preferred && !inferred && providers.length === 0) {
-    providers.push(
-      {
-        provider: "openai",
-        apiKey: genericKey,
-        models: uniqueModels(["gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini"]),
-      },
-      {
-        provider: "gemini",
-        apiKey: genericKey,
-        models: uniqueModels(["gemini-2.5-flash", "gemini-2.5-flash-lite"]),
-      },
-    );
-  }
-
-  const preference: ProviderName | null =
-    preferred === "gemini" || preferred === "openai" ? preferred : null;
-
-  if (preference) {
-    providers.sort((a, b) => {
-      if (a.provider === preference && b.provider !== preference) return -1;
-      if (a.provider !== preference && b.provider === preference) return 1;
-      return 0;
-    });
-  }
-
-  return providers.filter(
-    (provider, index, all) =>
-      all.findIndex(
-        (candidate) =>
-          candidate.provider === provider.provider && candidate.apiKey === provider.apiKey,
-      ) === index,
-  );
+function configuredApiKeys(): string[] {
+  return uniqueValues([process.env.GOOGLE_API_KEY, process.env.GEMINI_API_KEY]);
 }
 
-function explainProviderFailure(error: unknown): string {
-  if (!(error instanceof ProviderRequestError)) {
-    return "The provider returned an invalid or incomplete structured response.";
+function configuredModels(): string[] {
+  return uniqueValues([
+    process.env.GEMINI_MODEL,
+    "gemini-3.6-flash",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+  ]);
+}
+
+function explainGeminiFailure(error: unknown): string {
+  if (!(error instanceof GeminiRequestError)) {
+    return "Gemini returned an invalid or incomplete structured response.";
   }
 
-  const label = error.provider === "openai" ? "OpenAI" : "Gemini";
-
-  if (error.status === 401) return `${label} rejected the API key. Verify that the key is valid and active.`;
-  if (error.status === 403) return `${label} denied access. Verify project permissions and model access.`;
-  if (error.status === 404) return `${label} could not find the configured model.`;
-  if (error.status === 429) {
-    return `${label} quota or rate limit was exceeded. Check provider quota, billing, and rate limits.`;
-  }
   if (error.status === 400) {
-    return `${label} rejected the request configuration for model ${error.model}.`;
+    return `Gemini rejected the request configuration for model ${error.model}.`;
   }
-  if (error.status >= 500) return `${label} is temporarily unavailable.`;
+  if (error.status === 401) {
+    return "Google rejected the API key. Verify that GOOGLE_API_KEY or GEMINI_API_KEY contains an active Gemini API key.";
+  }
+  if (error.status === 403) {
+    return "Google denied Gemini API access. Check the Google AI project, API restrictions, and permissions for the key.";
+  }
+  if (error.status === 404) {
+    return `Gemini model ${error.model} is not available for this API key.`;
+  }
+  if (error.status === 429) {
+    return "Gemini quota or rate limit was exceeded. Check the Google AI Studio quota and billing limits.";
+  }
+  if (error.status >= 500) {
+    return "Gemini is temporarily unavailable. Please try again shortly.";
+  }
 
-  return `${label} request failed with status ${error.status}.`;
+  return `Gemini request failed with status ${error.status}.`;
 }
 
 export async function POST(request: Request) {
@@ -520,13 +362,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const providers = configuredProviders();
+  const apiKeys = configuredApiKeys();
+  const models = configuredModels();
 
-  if (providers.length === 0) {
+  if (apiKeys.length === 0) {
     return NextResponse.json(
       {
         error:
-          "AI analysis is not configured. Add OPENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY in Vercel. You may also use AI_API_KEY with AI_PROVIDER set to openai or gemini.",
+          "Gemini is not configured. Add GOOGLE_API_KEY or GEMINI_API_KEY in Vercel and redeploy the project.",
       },
       { status: 503 },
     );
@@ -534,42 +377,40 @@ export async function POST(request: Request) {
 
   const visibleFailures: string[] = [];
 
-  for (const provider of providers) {
-    for (const model of provider.models) {
+  for (const apiKey of apiKeys) {
+    for (const model of models) {
       try {
-        const firstAttempt = await generateWithProvider(provider, model, transcript);
+        const firstAttempt = await generateWithGemini({ apiKey, model, transcript });
 
         if (firstAttempt.validation.length === 0) {
           return NextResponse.json({
             output: firstAttempt.output,
-            mode: provider.provider,
+            mode: "gemini",
             model,
           });
         }
 
-        const repairedAttempt = await generateWithProvider(
-          provider,
+        const repairedAttempt = await generateWithGemini({
+          apiKey,
           model,
           transcript,
-          firstAttempt.validation,
-        );
+          repairIssues: firstAttempt.validation,
+        });
 
         if (repairedAttempt.validation.length > 0) {
           throw new Error(
-            `${provider.provider} response failed validation: ${repairedAttempt.validation.join(
-              "; ",
-            )}`,
+            `Gemini response failed validation: ${repairedAttempt.validation.join("; ")}`,
           );
         }
 
         return NextResponse.json({
           output: repairedAttempt.output,
-          mode: provider.provider,
+          mode: "gemini",
           model,
         });
       } catch (error) {
-        console.error(`${provider.provider}/${model} interaction analysis failed.`, error);
-        visibleFailures.push(explainProviderFailure(error));
+        console.error(`Gemini/${model} interaction analysis failed.`, error);
+        visibleFailures.push(explainGeminiFailure(error));
       }
     }
   }
@@ -581,7 +422,7 @@ export async function POST(request: Request) {
       error:
         uniqueFailures.length > 0
           ? uniqueFailures.join(" ")
-          : "The configured AI providers could not generate reliable work notes.",
+          : "Gemini could not generate reliable work notes from this interaction.",
     },
     { status: 502 },
   );
