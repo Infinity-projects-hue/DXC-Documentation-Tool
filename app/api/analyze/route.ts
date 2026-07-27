@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  analyzeTranscriptLocally,
-  type AnalyzerOutput,
-} from "@/lib/analyzeTranscript";
+import type { AnalyzerOutput } from "@/lib/analyzeTranscript";
 
 export const runtime = "nodejs";
 
@@ -14,78 +11,111 @@ const responseSchema = {
       type: "object",
       additionalProperties: false,
       properties: {
-        issue: { type: "string" },
+        issue: {
+          type: "string",
+          description:
+            "One Issue entry describing the User's technical impact, affected service or device, and clearly supported cause in 1 to 3 professional sentences.",
+        },
         tsPerformed: {
           type: "array",
+          description:
+            "Chronological troubleshooting performed by the DXC Agent or explicitly instructed by the Agent, with one concise action per item.",
           items: { type: "string" },
         },
-        output: { type: "string" },
+        output: {
+          type: "string",
+          description:
+            "One Output entry stating only the final technical result or finding after troubleshooting in 1 to 3 concise sentences.",
+        },
       },
       required: ["issue", "tsPerformed", "output"],
     },
-    resolutionNotes: { type: "string" },
+    resolutionNotes: {
+      type: "string",
+      description:
+        "Exactly two concise professional sentences: current Incident status, followed by the confirmed fix/validation or the outstanding dependency.",
+    },
   },
   required: ["workNotes", "resolutionNotes"],
 } as const;
 
 const systemInstruction = [
-  "You are a Senior IT Service Desk Analyst documenting incidents in ServiceNow after a support interaction.",
-  "The input may be the complete raw conversation from the first greeting through the final thank-you message, a live chat transcript, call transcript, AI-generated call summary, chat summary, incident notes, ticket description, or any combination of these.",
-  "Treat the entire input as evidence to analyze, not as text to summarize or repeat.",
-  "Silently ignore greetings, introductions, how-are-you exchanges, pleasantries, apologies, empathy statements, acknowledgements, hold messages, typing indicators, timestamps, queue messages, repeated restatements, survey invitations, thank-you messages, goodbye statements, and standard support closing scripts.",
-  "Never include phrases such as hello, how are you, thank you for contacting support, is there anything else, have a good day, or similar conversational filler in any output field.",
-  "Retain identity verification only when it was explicitly performed by the Agent and is relevant as a documented support action.",
-  "Analyze the incident like an experienced DXC Service Desk engineer; do not summarize the conversation.",
-  "Silently identify the primary issue, affected application/service/device/account, business impact, clearly supported root cause, every Agent troubleshooting action, chronological troubleshooting order, final technical finding, and current incident status before writing.",
-  "Use only facts explicitly present in the supplied input. Infer only what is reasonably supported when the input is a summary.",
-  "Never fabricate troubleshooting, escalations, technical findings, root causes, resolutions, User actions, approvals, timelines, callbacks, ticket status, or future work.",
-  "Return only the JSON required by the schema: workNotes.issue, workNotes.tsPerformed, workNotes.output, and resolutionNotes.",
-  "Do not return Summary, Next Action, RCA, recommendations, greetings, conversation recap, or any additional section.",
+  "You are a Senior DXC IT Service Desk Analyst creating ServiceNow Work Notes from complete support interactions.",
+  "The input is usually a long interactive conversation containing User messages, DXC Analyst messages, timestamps, names, automated system messages, greetings, clarifying questions, repeated explanations, hold messages, acknowledgements, and closing statements.",
+  "Do not summarize the conversation. Analyze the dialogue and extract only the technical documentation required by the JSON schema.",
 
-  "ISSUE RULES:",
-  "Write exactly one Issue entry as one string containing 2 to 3 professional sentences when the available facts support that length.",
-  "Begin with the User's technical impact, then identify the affected application, service, device, or account, and include the known cause only when clearly evident.",
-  "Describe the technical problem rather than the conversation or the reason the User contacted support.",
-  "Do not include greetings, emotional statements, general requests for help, or closing language.",
-  "Do not include bullet symbols in the string because the interface adds the > prefix.",
+  "SPEAKER AND ROLE ANALYSIS:",
+  "Identify the supported person as the User. Labels may include User, Customer, Caller, Client, Employee, Requester, End User, a person's name, or may be inferred from context.",
+  "Identify DXC support personnel as the Agent. Labels may include Agent, Analyst, DXC Analyst, Support, Service Desk, Technician, Engineer, or a person's name associated with support actions.",
+  "Use speaker labels, timestamps, message order, questions, answers, and technical context to determine who reported the issue, who provided troubleshooting, and who confirmed the result.",
+  "A User statement is evidence of the issue, symptoms, business impact, actions completed, and final confirmation. An Agent statement is evidence of investigation, checks, troubleshooting performed, instructions provided, escalation, and status handling.",
+  "Do not confuse a User's description of the problem with an Agent troubleshooting action.",
+  "Do not treat a User's casual reply, acknowledgement, or repeated symptom as troubleshooting.",
 
-  "TS PERFORMED RULES:",
-  "Include every troubleshooting action actually performed or explicitly communicated by the Agent, in chronological order.",
-  "Return one concise action per array item and use professional past-tense wording.",
-  "Include relevant actions such as issue review, identity verification, account checks, licensing checks, configuration checks, troubleshooting, guidance, remote session activity, screenshots or logs requested, resets, updates, escalation, ticket creation or reference, callbacks, next-step advice, replacement arrangements, or hold status only when explicitly present.",
-  "Do not treat greetings, apologies, empathy, acknowledgements, hold notifications, repeated questions, generic reassurance, or closing statements as troubleshooting actions.",
-  "Do not combine unrelated actions into one item when they can be written as separate chronological actions.",
-  "Remove duplicate actions, filler, repeated information, and unrelated conversation.",
-  "Do not invent any troubleshooting step.",
-  "Do not include bullet symbols in array items because the interface adds the > prefix.",
+  "IGNORE CONVERSATIONAL NOISE:",
+  "Silently ignore greetings, introductions, how-are-you exchanges, pleasantries, apologies, empathy statements, acknowledgements, hold notifications, typing indicators, queue messages, bot prompts, survey invitations, repeated restatements, thank-you messages, goodbye statements, and standard support closing scripts.",
+  "Never include hello, thank you for contacting support, is there anything else, have a good day, or similar filler in any output field.",
+  "Retain identity verification only when the Agent explicitly completed it and it is appropriate to document as an Agent action.",
 
-  "OUTPUT RULES:",
-  "Write exactly one Output entry as one string containing 1 to 3 concise professional sentences.",
-  "State only the final technical finding or conclusion after troubleshooting.",
-  "Do not mention greetings, conversation flow, future actions, or support closing statements, and do not treat pending status as a resolution.",
-  "Do not repeat Resolution Notes.",
-  "Do not include bullet symbols in the string because the interface adds the > prefix.",
+  "FACTUAL GROUNDING:",
+  "Use only facts supported by the supplied interaction. Never fabricate troubleshooting, commands, checks, escalations, root causes, technical findings, approvals, timelines, resolutions, User actions, or final confirmation.",
+  "When a cause is not confirmed, describe only the observed symptom or blocker.",
+  "When a successful result is not confirmed, do not mark the Incident resolved.",
+  "Remove duplicate actions while preserving the original chronological sequence.",
 
-  "RESOLUTION NOTES RULES:",
-  "Write exactly one Resolution Notes entry as one string containing 1 to 2 concise professional sentences.",
-  "Describe only the current incident status, such as Resolved, Pending User Action, Pending Manager Approval, Pending License Assignment, Pending Replacement, Pending Restart, Pending Validation, Pending Callback, Pending Synchronization, Escalated, Awaiting Specialist Team, Awaiting Hardware, Awaiting Remote Session, Awaiting Admin Credentials, On Hold, or Transferred.",
-  "Do not repeat the technical finding from Output.",
-  "When no resolution is confirmed, clearly state the actual pending or escalated status supported by the input.",
-  "Do not include thank-you messages, contact-closing language, or conversational statements.",
-  "Do not include bullet symbols in the string because the interface adds the > prefix.",
+  "ISSUE:",
+  "Write one Issue entry containing 1 to 3 professional sentences.",
+  "Start with the User's technical impact: what the User could not do, what failed, or what service/device/account was affected.",
+  "Include the affected application, service, device, or account and the business impact when stated.",
+  "Include a cause only when it was clearly established during the interaction.",
+  "Do not describe that the User contacted support and do not recap the conversation.",
+  "Do not add a bullet symbol because the interface adds the > prefix.",
 
-  "TERMINOLOGY AND STYLE:",
-  "Always use the terms User, Agent, Incident, Ticket, or Case where applicable.",
-  "Never use Customer, Caller, Client, I, We, You, He, She, or They.",
-  "Use concise, professional, technical ServiceNow wording suitable for direct pasting into Work Notes.",
+  "TS PERFORMED:",
+  "Document the troubleshooting provided by the DXC Agent in chronological order, with one action per array item.",
+  "Include actions the Agent directly performed, such as reviewing the issue, checking account status, examining configuration, running commands, resetting components, changing settings, testing functionality, reviewing logs, creating or referencing a Ticket, escalating a Case, or arranging a callback.",
+  "Include troubleshooting the Agent instructed the User to perform, phrased accurately as Guided the User to..., Advised the User to..., Instructed the User to..., or Requested the User to....",
+  "When the User confirms completing an Agent instruction, document the Agent's guidance and include the confirmation only when it materially explains the result.",
+  "Do not claim the Agent performed an action that the User performed. Do not claim the User performed an instructed step unless completion is confirmed in the conversation.",
+  "Do not include generic best-practice steps, inferred steps, future possibilities, greetings, empathy, repetitive questions, or closing statements.",
+  "Use concise professional past-tense wording. Do not add bullet symbols because the interface adds the > prefix.",
+
+  "OUTPUT:",
+  "Write one Output entry containing 1 to 3 concise professional sentences.",
+  "State what happened after the troubleshooting: successful access, restored functionality, persistent error, identified blocker, failed test, required credentials, missing license, escalation requirement, or another supported technical conclusion.",
+  "Output is the technical result, not the resolution status and not a list of future actions.",
+  "Do not merely repeat the Issue or the troubleshooting steps.",
+  "If the interaction ends without a confirmed technical result, state that no successful outcome was confirmed and identify the last supported finding.",
+  "Do not add a bullet symbol because the interface adds the > prefix.",
+
+  "RESOLUTION NOTES:",
+  "Write exactly two short professional sentences in one string.",
+  "Sentence 1 must state the current Incident status: Resolved, Pending User Action, Pending Manager Approval, Pending License Assignment, Pending Replacement, Pending Restart, Pending Validation, Pending Callback, Pending Synchronization, Escalated, Awaiting Specialist Team, Awaiting Hardware, Awaiting Remote Session, Awaiting Admin Credentials, On Hold, or Transferred.",
+  "Sentence 2 must briefly state the confirmed fix and User validation when resolved, or the precise outstanding dependency/next ownership when unresolved.",
+  "Keep both sentences specific to the interaction. Do not use vague wording such as documented troubleshooting actions were completed.",
+  "Do not repeat the full Output and do not add a bullet symbol because the interface adds the > prefix.",
+
+  "TERMINOLOGY AND OUTPUT CONTROL:",
+  "Use User, Agent, Incident, Ticket, or Case where applicable. Do not use Customer, Caller, Client, I, We, You, He, She, or They in the generated documentation.",
   "Correct grammar and product names while preserving technical meaning.",
-  "Keep the Issue analytical, troubleshooting chronological, Output technical, and Resolution Notes status-focused.",
-  "Before returning, verify no conversational filler remains, no troubleshooting or resolution was invented, and all four fields comply with these rules.",
+  "Return only workNotes.issue, workNotes.tsPerformed, workNotes.output, and resolutionNotes in the required JSON schema.",
+  "Do not return Summary, RCA, Next Action, recommendations, headings, markdown, bullet characters, or any other section.",
+  "Before returning, verify that the Issue belongs to the supported User, every TS item came from the Agent's actual action or instruction, Output reflects the real result, Resolution Notes contain exactly two sentences, and nothing was invented.",
 ].join(" ");
 
-function isValidOutput(value: unknown): value is AnalyzerOutput {
+const CONVERSATIONAL_FILLER =
+  /\b(?:hello|good morning|good afternoon|good evening|how are you|thank you for contacting|is there anything else|have a good day|you'?re welcome)\b/i;
+
+function sentenceCount(value: string): number {
+  return (value.match(/[^.!?]+[.!?]+|[^.!?]+$/g) ?? [])
+    .map((sentence) => sentence.trim())
+    .filter(Boolean).length;
+}
+
+function isStructurallyValid(value: unknown): value is AnalyzerOutput {
   if (!value || typeof value !== "object") return false;
   const candidate = value as AnalyzerOutput;
+
   return (
     typeof candidate.workNotes?.issue === "string" &&
     candidate.workNotes.issue.trim().length > 0 &&
@@ -99,6 +129,39 @@ function isValidOutput(value: unknown): value is AnalyzerOutput {
     typeof candidate.resolutionNotes === "string" &&
     candidate.resolutionNotes.trim().length > 0
   );
+}
+
+function validationIssues(output: AnalyzerOutput): string[] {
+  const issues: string[] = [];
+  const issueCount = sentenceCount(output.workNotes.issue);
+  const outputCount = sentenceCount(output.workNotes.output);
+  const resolutionCount = sentenceCount(output.resolutionNotes);
+
+  if (issueCount < 1 || issueCount > 3) {
+    issues.push("Issue must contain 1 to 3 sentences");
+  }
+  if (output.workNotes.tsPerformed.length > 20) {
+    issues.push("TS Performed must contain no more than 20 chronological actions");
+  }
+  if (outputCount < 1 || outputCount > 3) {
+    issues.push("Output must contain 1 to 3 sentences");
+  }
+  if (resolutionCount !== 2) {
+    issues.push("Resolution Notes must contain exactly two sentences");
+  }
+
+  const allText = [
+    output.workNotes.issue,
+    ...output.workNotes.tsPerformed,
+    output.workNotes.output,
+    output.resolutionNotes,
+  ].join(" ");
+
+  if (CONVERSATIONAL_FILLER.test(allText)) {
+    issues.push("Conversational greetings or closing filler must be removed");
+  }
+
+  return issues;
 }
 
 function extractOutputText(payload: unknown): string | null {
@@ -136,7 +199,7 @@ function parseStructuredOutput(text: string): unknown {
   return JSON.parse(cleaned) as unknown;
 }
 
-function cleanSentence(value: string): string {
+function cleanEntry(value: string): string {
   return value
     .trim()
     .replace(/^\s*(?:[>•*\-]|\d+[.)])\s*/, "")
@@ -147,23 +210,107 @@ function normalizeOutput(output: AnalyzerOutput): AnalyzerOutput {
   const uniqueActions = Array.from(
     new Map(
       output.workNotes.tsPerformed
-        .map(cleanSentence)
+        .map(cleanEntry)
         .filter(Boolean)
         .map((item) => [item.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), item]),
     ).values(),
-  ).slice(0, 18);
+  ).slice(0, 20);
 
   return {
     workNotes: {
-      issue: cleanSentence(output.workNotes.issue),
-      tsPerformed:
-        uniqueActions.length > 0
-          ? uniqueActions
-          : ["No troubleshooting actions were clearly documented in the supplied interaction."],
-      output: cleanSentence(output.workNotes.output),
+      issue: cleanEntry(output.workNotes.issue),
+      tsPerformed: uniqueActions,
+      output: cleanEntry(output.workNotes.output),
     },
-    resolutionNotes: cleanSentence(output.resolutionNotes),
+    resolutionNotes: cleanEntry(output.resolutionNotes),
   };
+}
+
+type OpenAIResult = {
+  output: AnalyzerOutput;
+  validation: string[];
+};
+
+async function generateWithOpenAI({
+  apiKey,
+  model,
+  transcript,
+  repairIssues = [],
+}: {
+  apiKey: string;
+  model: string;
+  transcript: string;
+  repairIssues?: string[];
+}): Promise<OpenAIResult> {
+  const repairInstruction = repairIssues.length
+    ? `\n\nThe previous generation failed these checks: ${repairIssues.join(
+        "; ",
+      )}. Regenerate the documentation and correct every listed problem.`
+    : "";
+
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(55_000),
+    body: JSON.stringify({
+      model,
+      store: false,
+      max_output_tokens: 2200,
+      reasoning: { effort: "medium" },
+      instructions: systemInstruction,
+      input: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: [
+                "Analyze the complete raw DXC support interaction below.",
+                "Determine the User and Agent roles from labels and context.",
+                "Extract the User's technical issue, the DXC Agent's actual troubleshooting/actions/instructions in chronological order, the real technical outcome, and exactly two concise Resolution Notes sentences.",
+                "Ignore all non-technical conversation.",
+                repairInstruction,
+                "",
+                "<support_interaction>",
+                transcript,
+                "</support_interaction>",
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+      text: {
+        verbosity: "low",
+        format: {
+          type: "json_schema",
+          name: "dxc_servicenow_work_notes",
+          description:
+            "DXC ServiceNow documentation containing the User's Issue, chronological Agent TS Performed, technical Output, and exactly two-sentence Resolution Notes.",
+          strict: true,
+          schema: responseSchema,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`OpenAI request failed with status ${response.status}: ${detail.slice(0, 400)}`);
+  }
+
+  const payload = (await response.json()) as unknown;
+  const outputText = extractOutputText(payload);
+  const parsed = outputText ? parseStructuredOutput(outputText) : null;
+
+  if (!isStructurallyValid(parsed)) {
+    throw new Error("OpenAI returned an invalid structured documentation response.");
+  }
+
+  const output = normalizeOutput(parsed);
+  return { output, validation: validationIssues(output) };
 }
 
 export async function POST(request: Request) {
@@ -178,85 +325,58 @@ export async function POST(request: Request) {
 
   if (!transcript) {
     return NextResponse.json(
-      { error: "Paste an interaction transcript before analyzing." },
+      { error: "Paste the complete support interaction before analyzing." },
       { status: 400 },
     );
   }
 
   if (transcript.length > 60_000) {
     return NextResponse.json(
-      { error: "The transcript is too long. Please keep it under 60,000 characters." },
+      { error: "The interaction is too long. Please keep it under 60,000 characters." },
       { status: 413 },
     );
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({
-      output: analyzeTranscriptLocally(transcript),
-      mode: "local",
-    });
+    return NextResponse.json(
+      {
+        error:
+          "OpenAI analysis is not configured. Add OPENAI_API_KEY in Vercel and redeploy the project.",
+      },
+      { status: 503 },
+    );
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-5-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-5.1";
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        store: false,
-        max_output_tokens: 1800,
-        instructions: systemInstruction,
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: `The following may be the complete raw support conversation, including greetings, small talk, repeated statements, and closing messages. Ignore all conversational filler and generate DXC-standard ServiceNow Work Notes using only the technical issue, Agent troubleshooting actions, final technical finding, and current resolution status.\n\n${transcript}`,
-              },
-            ],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "dxc_servicenow_work_notes",
-            description:
-              "Structured DXC ServiceNow documentation containing Issue, chronological TS Performed, Output, and Resolution Notes.",
-            strict: true,
-            schema: responseSchema,
-          },
-        },
-      }),
+    const firstAttempt = await generateWithOpenAI({ apiKey, model, transcript });
+
+    if (firstAttempt.validation.length === 0) {
+      return NextResponse.json({ output: firstAttempt.output, mode: "openai" });
+    }
+
+    const repairedAttempt = await generateWithOpenAI({
+      apiKey,
+      model,
+      transcript,
+      repairIssues: firstAttempt.validation,
     });
 
-    if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(
-        `OpenAI request failed with status ${response.status}: ${detail.slice(0, 400)}`,
-      );
+    if (repairedAttempt.validation.length > 0) {
+      throw new Error(`OpenAI response failed validation: ${repairedAttempt.validation.join("; ")}`);
     }
 
-    const payload = (await response.json()) as unknown;
-    const outputText = extractOutputText(payload);
-    const parsed = outputText ? parseStructuredOutput(outputText) : null;
-
-    if (!isValidOutput(parsed)) {
-      throw new Error("OpenAI returned an invalid documentation response.");
-    }
-
-    return NextResponse.json({ output: normalizeOutput(parsed), mode: "openai" });
+    return NextResponse.json({ output: repairedAttempt.output, mode: "openai" });
   } catch (error) {
-    console.error("OpenAI analysis failed; using grounded local fallback.", error);
-    return NextResponse.json({
-      output: analyzeTranscriptLocally(transcript),
-      mode: "local",
-    });
+    console.error("OpenAI interaction analysis failed.", error);
+    return NextResponse.json(
+      {
+        error:
+          "The AI could not generate reliable work notes from this interaction. Verify the OpenAI key, model access, and API quota, then try again.",
+      },
+      { status: 502 },
+    );
   }
 }
