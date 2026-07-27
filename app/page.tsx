@@ -25,7 +25,7 @@ export default function HomeWorkspacePage() {
           </div>
 
           <h1 className="max-w-3xl text-balance text-4xl font-semibold leading-[1.03] tracking-[-0.045em] text-slate-900 sm:text-5xl lg:text-[64px]">
-            AI Interaction <span className="bg-[linear-gradient(135deg,#5c8ff3_0%,#f7944d_52%,#8e8fe2_100%)] bg-clip-text text-transparent">Analyzer</span>
+            AI <span className="bg-[linear-gradient(135deg,#5c8ff3_0%,#f7944d_52%,#8e8fe2_100%)] bg-clip-text text-transparent">Analyzer</span>
           </h1>
           <p className="mt-5 max-w-3xl text-base leading-7 text-slate-600 sm:text-lg">
             Paste the complete support conversation from the opening greeting through the closing statement. The analyzer ignores small talk, repeated dialogue, and closing messages, then extracts only the Issue, troubleshooting performed, technical Output, and Resolution Notes.
