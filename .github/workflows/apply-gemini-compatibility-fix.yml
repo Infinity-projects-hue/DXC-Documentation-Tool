@@ -1,0 +1,75 @@
+name: Apply Gemini compatibility fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply model-specific Gemini configuration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/api/analyze/route.ts')
+          text = path.read_text()
+
+          old = '''        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 2200,
+          responseFormat: {
+            text: {
+              mimeType: "application/json",
+              schema: responseSchema,
+            },
+          },
+        },
+'''
+
+          new = '''        generationConfig: model.startsWith("gemini-3")
+          ? {
+              maxOutputTokens: 2200,
+              responseFormat: {
+                text: {
+                  mimeType: "application/json",
+                  schema: responseSchema,
+                },
+              },
+            }
+          : {
+              maxOutputTokens: 2200,
+              responseMimeType: "application/json",
+              responseJsonSchema: responseSchema,
+            },
+'''
+
+          if old not in text:
+              raise SystemExit('Expected Gemini generationConfig block was not found.')
+
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Validate production build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Remove one-time workflow and commit fix
+        run: |
+          rm .github/workflows/apply-gemini-compatibility-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/api/analyze/route.ts .github/workflows/apply-gemini-compatibility-fix.yml
+          git commit -m "Fix Gemini structured output compatibility"
+          git push origin HEAD:main
