@@ -1,22 +1,35 @@
 # DXC Documentation Tool
 
-A polished, responsive frontend that converts support transcripts or call summaries into structured Work Notes and Resolution Notes.
+A Next.js support-documentation workspace that converts full support transcripts into structured ServiceNow Work Notes and two-sentence Resolution Notes.
 
-## Included
-- Motion-led landing page inspired by modern technical audit products
-- Transcript input and sample content
-- Browser-side structured note generation
-- Editable output
-- Copy section / copy all
-- Text export
-- No history function or history button
-- No ChatGPT, model, AI Ready, Light, DX circle, or Next Action UI
+## AI providers
 
-## Run
-Open `index.html` directly, or serve the folder:
+The analyzer supports OpenAI, Google Gemini, and Anthropic Claude. Configure one or more server-side environment variables:
 
 ```bash
-python -m http.server 8000
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your_google_ai_studio_key
 ```
 
-Then open `http://localhost:8000`.
+Alternative provider keys:
+
+```bash
+OPENAI_API_KEY=your_openai_key
+ANTHROPIC_API_KEY=your_anthropic_key
+```
+
+`GOOGLE_API_KEY` and `CLAUDE_API_KEY` are supported aliases. Never expose provider keys through variables beginning with `NEXT_PUBLIC_`.
+
+## Local development
+
+```bash
+npm install
+cp .env.example .env.local
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+## Production
+
+Add the same environment variables in Vercel for Production, then create a new deployment. The browser sends transcripts only to the server-side `/api/analyze` route; provider credentials remain server-side.
