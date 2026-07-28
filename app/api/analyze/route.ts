@@ -63,19 +63,28 @@ const systemInstruction = [
 const CONVERSATIONAL_FILLER =
   /\b(?:hello|good morning|good afternoon|good evening|how are you|thank you for contacting|is there anything else|have a good day|you'?re welcome)\b/i;
 
-type OpenAIResult = {
+type ProviderName = "openai" | "gemini" | "anthropic";
+
+type ProviderConfig = {
+  provider: ProviderName;
+  apiKey: string;
+  models: string[];
+};
+
+type ProviderResult = {
   output: AnalyzerOutput;
   validation: string[];
 };
 
-class OpenAIRequestError extends Error {
+class ProviderRequestError extends Error {
   constructor(
+    readonly provider: ProviderName,
     readonly model: string,
     readonly status: number,
     message: string,
   ) {
     super(message);
-    this.name = "OpenAIRequestError";
+    this.name = "ProviderRequestError";
   }
 }
 
@@ -166,6 +175,15 @@ function normalizeOutput(output: AnalyzerOutput): AnalyzerOutput {
   };
 }
 
+function validateProviderOutput(parsed: unknown, provider: ProviderName): ProviderResult {
+  if (!isStructurallyValid(parsed)) {
+    throw new Error(`${provider} returned an invalid structured documentation response.`);
+  }
+
+  const output = normalizeOutput(parsed);
+  return { output, validation: validationIssues(output) };
+}
+
 function buildInteractionPrompt(transcript: string, repairIssues: string[]): string {
   const repairInstruction = repairIssues.length
     ? `The previous generation failed these checks: ${repairIssues.join(
@@ -215,30 +233,61 @@ function extractOpenAIText(payload: unknown): string | null {
   return null;
 }
 
-function validateOpenAIOutput(parsed: unknown): OpenAIResult {
-  if (!isStructurallyValid(parsed)) {
-    throw new Error("OpenAI returned an invalid structured documentation response.");
+function extractGeminiText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidates = (payload as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates)) return null;
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const content = (candidate as { content?: unknown }).content;
+    if (!content || typeof content !== "object") continue;
+    const parts = (content as { parts?: unknown }).parts;
+    if (!Array.isArray(parts)) continue;
+
+    const text = parts
+      .map((part) =>
+        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
+          ? (part as { text: string }).text
+          : "",
+      )
+      .join("")
+      .trim();
+
+    if (text) return text;
   }
 
-  const output = normalizeOutput(parsed);
-  return { output, validation: validationIssues(output) };
+  return null;
 }
 
-async function generateWithOpenAI({
-  apiKey,
-  model,
-  transcript,
-  repairIssues = [],
-}: {
-  apiKey: string;
-  model: string;
-  transcript: string;
-  repairIssues?: string[];
-}): Promise<OpenAIResult> {
+function extractAnthropicText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const content = (payload as { content?: unknown }).content;
+  if (!Array.isArray(content)) return null;
+
+  const text = content
+    .map((block) => {
+      if (!block || typeof block !== "object") return "";
+      const type = (block as { type?: unknown }).type;
+      const value = (block as { text?: unknown }).text;
+      return type === "text" && typeof value === "string" ? value : "";
+    })
+    .join("")
+    .trim();
+
+  return text || null;
+}
+
+async function generateWithOpenAI(
+  config: ProviderConfig,
+  model: string,
+  transcript: string,
+  repairIssues: string[] = [],
+): Promise<ProviderResult> {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
     },
     signal: AbortSignal.timeout(55_000),
@@ -273,7 +322,8 @@ async function generateWithOpenAI({
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new OpenAIRequestError(
+    throw new ProviderRequestError(
+      "openai",
       model,
       response.status,
       `OpenAI request failed: ${detail.slice(0, 600)}`,
@@ -283,47 +333,285 @@ async function generateWithOpenAI({
   const payload = (await response.json()) as unknown;
   const text = extractOpenAIText(payload);
   const parsed = text ? parseStructuredOutput(text) : null;
-  return validateOpenAIOutput(parsed);
+  return validateProviderOutput(parsed, "openai");
+}
+
+async function generateWithGemini(
+  config: ProviderConfig,
+  model: string,
+  transcript: string,
+  repairIssues: string[] = [],
+): Promise<ProviderResult> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model,
+    )}:generateContent`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": config.apiKey,
+      },
+      signal: AbortSignal.timeout(55_000),
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: buildInteractionPrompt(transcript, repairIssues) }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 2200,
+          responseFormat: {
+            text: {
+              mimeType: "application/json",
+              schema: responseSchema,
+            },
+          },
+        },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new ProviderRequestError(
+      "gemini",
+      model,
+      response.status,
+      `Gemini request failed: ${detail.slice(0, 600)}`,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  const text = extractGeminiText(payload);
+  const parsed = text ? parseStructuredOutput(text) : null;
+  return validateProviderOutput(parsed, "gemini");
+}
+
+async function generateWithAnthropic(
+  config: ProviderConfig,
+  model: string,
+  transcript: string,
+  repairIssues: string[] = [],
+): Promise<ProviderResult> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": config.apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    signal: AbortSignal.timeout(55_000),
+    body: JSON.stringify({
+      model,
+      max_tokens: 2200,
+      system: systemInstruction,
+      messages: [
+        {
+          role: "user",
+          content: buildInteractionPrompt(transcript, repairIssues),
+        },
+      ],
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: responseSchema,
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new ProviderRequestError(
+      "anthropic",
+      model,
+      response.status,
+      `Anthropic request failed: ${detail.slice(0, 600)}`,
+    );
+  }
+
+  const payload = (await response.json()) as unknown;
+  const stopReason =
+    payload && typeof payload === "object"
+      ? (payload as { stop_reason?: unknown }).stop_reason
+      : undefined;
+
+  if (stopReason === "refusal" || stopReason === "max_tokens") {
+    throw new Error(`Anthropic response stopped with reason: ${String(stopReason)}.`);
+  }
+
+  const text = extractAnthropicText(payload);
+  const parsed = text ? parseStructuredOutput(text) : null;
+  return validateProviderOutput(parsed, "anthropic");
+}
+
+async function generateWithProvider(
+  config: ProviderConfig,
+  model: string,
+  transcript: string,
+  repairIssues: string[] = [],
+): Promise<ProviderResult> {
+  if (config.provider === "openai") {
+    return generateWithOpenAI(config, model, transcript, repairIssues);
+  }
+  if (config.provider === "gemini") {
+    return generateWithGemini(config, model, transcript, repairIssues);
+  }
+  return generateWithAnthropic(config, model, transcript, repairIssues);
 }
 
 function uniqueValues(values: Array<string | undefined>): string[] {
   return Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]));
 }
 
-function configuredModels(): string[] {
+function normalizeProviderName(value: string | undefined): ProviderName | null {
+  const normalized = value?.trim().toLowerCase();
+  if (normalized === "openai" || normalized === "open-ai") return "openai";
+  if (normalized === "gemini" || normalized === "google") return "gemini";
+  if (normalized === "anthropic" || normalized === "claude") return "anthropic";
+  return null;
+}
+
+function inferProviderFromKey(apiKey: string): ProviderName | null {
+  if (/^sk-ant-/i.test(apiKey)) return "anthropic";
+  if (/^AIza/i.test(apiKey)) return "gemini";
+  if (/^sk-/i.test(apiKey)) return "openai";
+  return null;
+}
+
+function providerModels(provider: ProviderName): string[] {
+  const genericModel = process.env.AI_MODEL;
+
+  if (provider === "openai") {
+    return uniqueValues([
+      process.env.OPENAI_MODEL,
+      genericModel,
+      "gpt-5-mini",
+      "gpt-4.1-mini",
+      "gpt-4o-mini",
+    ]);
+  }
+
+  if (provider === "gemini") {
+    return uniqueValues([
+      process.env.GEMINI_MODEL,
+      process.env.GOOGLE_MODEL,
+      genericModel,
+      "gemini-3.6-flash",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+    ]);
+  }
+
   return uniqueValues([
-    process.env.OPENAI_MODEL,
-    "gpt-5-mini",
-    "gpt-4.1-mini",
-    "gpt-4o-mini",
+    process.env.ANTHROPIC_MODEL,
+    process.env.CLAUDE_MODEL,
+    genericModel,
+    "claude-haiku-4-5",
+    "claude-sonnet-5",
+    "claude-sonnet-4-6",
   ]);
 }
 
-function explainOpenAIFailure(error: unknown): string {
-  if (!(error instanceof OpenAIRequestError)) {
-    return "OpenAI returned an invalid or incomplete structured response.";
+function configuredProviders(): ProviderConfig[] {
+  const preferred = normalizeProviderName(process.env.AI_PROVIDER);
+  const genericKey = process.env.AI_API_KEY?.trim();
+  const inferredGenericProvider = genericKey ? inferProviderFromKey(genericKey) : null;
+
+  const providerKeys: Record<ProviderName, string[]> = {
+    openai: uniqueValues([
+      process.env.OPENAI_API_KEY,
+      genericKey && (preferred === "openai" || (!preferred && inferredGenericProvider === "openai"))
+        ? genericKey
+        : undefined,
+    ]),
+    gemini: uniqueValues([
+      process.env.GEMINI_API_KEY,
+      process.env.GOOGLE_API_KEY,
+      genericKey && (preferred === "gemini" || (!preferred && inferredGenericProvider === "gemini"))
+        ? genericKey
+        : undefined,
+    ]),
+    anthropic: uniqueValues([
+      process.env.ANTHROPIC_API_KEY,
+      process.env.CLAUDE_API_KEY,
+      genericKey &&
+      (preferred === "anthropic" || (!preferred && inferredGenericProvider === "anthropic"))
+        ? genericKey
+        : undefined,
+    ]),
+  };
+
+  const order: ProviderName[] = ["openai", "gemini", "anthropic"];
+  if (preferred) {
+    order.splice(order.indexOf(preferred), 1);
+    order.unshift(preferred);
+  }
+
+  const providers: ProviderConfig[] = [];
+  for (const provider of order) {
+    for (const apiKey of providerKeys[provider]) {
+      providers.push({
+        provider,
+        apiKey,
+        models: providerModels(provider),
+      });
+    }
+  }
+
+  if (providers.length === 0 && genericKey && preferred) {
+    providers.push({
+      provider: preferred,
+      apiKey: genericKey,
+      models: providerModels(preferred),
+    });
+  }
+
+  return providers;
+}
+
+function providerLabel(provider: ProviderName): string {
+  if (provider === "openai") return "OpenAI";
+  if (provider === "gemini") return "Gemini/Google";
+  return "Claude/Anthropic";
+}
+
+function explainProviderFailure(error: unknown, provider: ProviderName): string {
+  const label = providerLabel(provider);
+
+  if (!(error instanceof ProviderRequestError)) {
+    return `${label} returned an invalid or incomplete structured response.`;
   }
 
   if (error.status === 400) {
-    return `OpenAI rejected the request configuration for model ${error.model}.`;
+    return `${label} rejected the request configuration for model ${error.model}.`;
   }
   if (error.status === 401) {
-    return "OpenAI rejected the API key. Verify that OPENAI_API_KEY contains an active OpenAI API key.";
+    return `${label} rejected the API key. Verify that the configured key is active and belongs to ${label}.`;
+  }
+  if (error.status === 402) {
+    return `${label} requires available API credits or an active billing plan.`;
   }
   if (error.status === 403) {
-    return "OpenAI denied API access. Check the project permissions and model access for the key.";
+    return `${label} denied API access. Check project permissions, API restrictions, and model access.`;
   }
   if (error.status === 404) {
-    return `OpenAI model ${error.model} is not available for this API key.`;
+    return `${label} model ${error.model} is not available for this API key.`;
   }
   if (error.status === 429) {
-    return "OpenAI quota or rate limit was exceeded. Check API usage, billing, and rate limits.";
+    return `${label} quota or rate limit was exceeded. Check API usage, billing, and rate limits.`;
   }
   if (error.status >= 500) {
-    return "OpenAI is temporarily unavailable. Please try again shortly.";
+    return `${label} is temporarily unavailable. Please try again shortly.`;
   }
 
-  return `OpenAI request failed with status ${error.status}.`;
+  return `${label} request failed with status ${error.status}.`;
 }
 
 export async function POST(request: Request) {
@@ -350,55 +638,75 @@ export async function POST(request: Request) {
     );
   }
 
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  const models = configuredModels();
+  const providers = configuredProviders();
 
-  if (!apiKey) {
+  if (providers.length === 0) {
     return NextResponse.json(
       {
         error:
-          "OpenAI is not configured. Add OPENAI_API_KEY in Vercel and redeploy the project.",
+          "No supported AI provider is configured. Add OPENAI_API_KEY, GEMINI_API_KEY or GOOGLE_API_KEY, or ANTHROPIC_API_KEY or CLAUDE_API_KEY in Vercel. You may also use AI_API_KEY with AI_PROVIDER set to openai, gemini, google, anthropic, or claude.",
       },
       { status: 503 },
     );
   }
 
   const visibleFailures: string[] = [];
+  const providersTried: ProviderName[] = [];
 
-  for (const model of models) {
-    try {
-      const firstAttempt = await generateWithOpenAI({ apiKey, model, transcript });
+  for (const provider of providers) {
+    if (!providersTried.includes(provider.provider)) {
+      providersTried.push(provider.provider);
+    }
 
-      if (firstAttempt.validation.length === 0) {
+    let moveToNextProvider = false;
+
+    for (const model of provider.models) {
+      try {
+        const firstAttempt = await generateWithProvider(provider, model, transcript);
+
+        if (firstAttempt.validation.length === 0) {
+          return NextResponse.json({
+            output: firstAttempt.output,
+            mode: provider.provider,
+            model,
+          });
+        }
+
+        const repairedAttempt = await generateWithProvider(
+          provider,
+          model,
+          transcript,
+          firstAttempt.validation,
+        );
+
+        if (repairedAttempt.validation.length > 0) {
+          throw new Error(
+            `${providerLabel(provider.provider)} response failed validation: ${repairedAttempt.validation.join(
+              "; ",
+            )}`,
+          );
+        }
+
         return NextResponse.json({
-          output: firstAttempt.output,
-          mode: "openai",
+          output: repairedAttempt.output,
+          mode: provider.provider,
           model,
         });
+      } catch (error) {
+        console.error(`${provider.provider}/${model} interaction analysis failed.`, error);
+        visibleFailures.push(explainProviderFailure(error, provider.provider));
+
+        if (
+          error instanceof ProviderRequestError &&
+          [401, 402, 403, 429].includes(error.status)
+        ) {
+          moveToNextProvider = true;
+          break;
+        }
       }
-
-      const repairedAttempt = await generateWithOpenAI({
-        apiKey,
-        model,
-        transcript,
-        repairIssues: firstAttempt.validation,
-      });
-
-      if (repairedAttempt.validation.length > 0) {
-        throw new Error(
-          `OpenAI response failed validation: ${repairedAttempt.validation.join("; ")}`,
-        );
-      }
-
-      return NextResponse.json({
-        output: repairedAttempt.output,
-        mode: "openai",
-        model,
-      });
-    } catch (error) {
-      console.error(`OpenAI/${model} interaction analysis failed.`, error);
-      visibleFailures.push(explainOpenAIFailure(error));
     }
+
+    if (moveToNextProvider) continue;
   }
 
   const uniqueFailures = Array.from(new Set(visibleFailures));
@@ -408,7 +716,8 @@ export async function POST(request: Request) {
       error:
         uniqueFailures.length > 0
           ? uniqueFailures.join(" ")
-          : "OpenAI could not generate reliable work notes from this interaction.",
+          : "The configured AI providers could not generate reliable work notes from this interaction.",
+      providersTried,
     },
     { status: 502 },
   );
