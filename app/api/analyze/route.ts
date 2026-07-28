@@ -233,24 +233,30 @@ function extractOpenAIText(payload: unknown): string | null {
   return null;
 }
 
-function extractGeminiText(payload: unknown): string | null {
+function extractGeminiInteractionText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
-  const candidates = (payload as { candidates?: unknown }).candidates;
-  if (!Array.isArray(candidates)) return null;
 
-  for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== "object") continue;
-    const content = (candidate as { content?: unknown }).content;
-    if (!content || typeof content !== "object") continue;
-    const parts = (content as { parts?: unknown }).parts;
-    if (!Array.isArray(parts)) continue;
+  const direct = (payload as { output_text?: unknown }).output_text;
+  if (typeof direct === "string" && direct.trim()) return direct.trim();
 
-    const text = parts
-      .map((part) =>
-        part && typeof part === "object" && typeof (part as { text?: unknown }).text === "string"
-          ? (part as { text: string }).text
-          : "",
-      )
+  const steps = (payload as { steps?: unknown }).steps;
+  if (!Array.isArray(steps)) return null;
+
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    if (!step || typeof step !== "object") continue;
+    if ((step as { type?: unknown }).type !== "model_output") continue;
+
+    const content = (step as { content?: unknown }).content;
+    if (!Array.isArray(content)) continue;
+
+    const text = content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const type = (part as { type?: unknown }).type;
+        const value = (part as { text?: unknown }).text;
+        return type === "text" && typeof value === "string" ? value : "";
+      })
       .join("")
       .trim();
 
@@ -276,6 +282,20 @@ function extractAnthropicText(payload: unknown): string | null {
     .trim();
 
   return text || null;
+}
+
+function stripUnsupportedGeminiSchemaKeywords(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripUnsupportedGeminiSchemaKeywords);
+  }
+
+  if (!value || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "additionalProperties")
+      .map(([key, nestedValue]) => [key, stripUnsupportedGeminiSchemaKeywords(nestedValue)]),
+  );
 }
 
 async function generateWithOpenAI(
@@ -326,7 +346,7 @@ async function generateWithOpenAI(
       "openai",
       model,
       response.status,
-      `OpenAI request failed: ${detail.slice(0, 600)}`,
+      `OpenAI request failed: ${detail.slice(0, 700)}`,
     );
   }
 
@@ -342,40 +362,28 @@ async function generateWithGemini(
   transcript: string,
   repairIssues: string[] = [],
 ): Promise<ProviderResult> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model,
-    )}:generateContent`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": config.apiKey,
-      },
-      signal: AbortSignal.timeout(55_000),
-      body: JSON.stringify({
-        systemInstruction: {
-          parts: [{ text: systemInstruction }],
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: buildInteractionPrompt(transcript, repairIssues) }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 2200,
-          responseFormat: {
-            text: {
-              mimeType: "application/json",
-              schema: responseSchema,
-            },
-          },
-        },
-      }),
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": config.apiKey,
     },
-  );
+    signal: AbortSignal.timeout(55_000),
+    body: JSON.stringify({
+      model,
+      system_instruction: systemInstruction,
+      input: buildInteractionPrompt(transcript, repairIssues),
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: stripUnsupportedGeminiSchemaKeywords(responseSchema),
+      },
+      generation_config: {
+        max_output_tokens: 2200,
+      },
+      store: false,
+    }),
+  });
 
   if (!response.ok) {
     const detail = await response.text();
@@ -383,12 +391,21 @@ async function generateWithGemini(
       "gemini",
       model,
       response.status,
-      `Gemini request failed: ${detail.slice(0, 600)}`,
+      `Gemini Interactions API request failed: ${detail.slice(0, 700)}`,
     );
   }
 
   const payload = (await response.json()) as unknown;
-  const text = extractGeminiText(payload);
+  const status =
+    payload && typeof payload === "object"
+      ? (payload as { status?: unknown }).status
+      : undefined;
+
+  if (status && status !== "completed") {
+    throw new Error(`Gemini interaction ended with status ${String(status)}.`);
+  }
+
+  const text = extractGeminiInteractionText(payload);
   const parsed = text ? parseStructuredOutput(text) : null;
   return validateProviderOutput(parsed, "gemini");
 }
@@ -432,7 +449,7 @@ async function generateWithAnthropic(
       "anthropic",
       model,
       response.status,
-      `Anthropic request failed: ${detail.slice(0, 600)}`,
+      `Anthropic request failed: ${detail.slice(0, 700)}`,
     );
   }
 
@@ -486,7 +503,8 @@ function inferProviderFromKey(apiKey: string): ProviderName | null {
 }
 
 function providerModels(provider: ProviderName): string[] {
-  const genericModel = process.env.AI_MODEL;
+  const preferred = normalizeProviderName(process.env.AI_PROVIDER);
+  const genericModel = preferred === provider ? process.env.AI_MODEL : undefined;
 
   if (provider === "openai") {
     return uniqueValues([
@@ -503,8 +521,11 @@ function providerModels(provider: ProviderName): string[] {
       process.env.GEMINI_MODEL,
       process.env.GOOGLE_MODEL,
       genericModel,
+      "gemini-flash-latest",
       "gemini-3.6-flash",
-      "gemini-2.5-flash",
+      "gemini-3.5-flash",
+      "gemini-flash-lite-latest",
+      "gemini-3.1-flash-lite",
       "gemini-2.5-flash-lite",
     ]);
   }
@@ -590,6 +611,9 @@ function explainProviderFailure(error: unknown, provider: ProviderName): string 
   }
 
   if (error.status === 400) {
+    if (provider === "gemini") {
+      return `Gemini rejected model ${error.model}. Remove any custom GEMINI_MODEL, GOOGLE_MODEL, or AI_MODEL override and redeploy.`;
+    }
     return `${label} rejected the request configuration for model ${error.model}.`;
   }
   if (error.status === 401) {
